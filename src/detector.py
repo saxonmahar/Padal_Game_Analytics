@@ -7,7 +7,6 @@ class Detector:
 
     def detect(self, frame):
         """
-        Runs YOLO detection on a single frame
+        Returns YOLO results for a frame
         """
-        results = self.model(frame)
-        return results
+        return self.model(frame)

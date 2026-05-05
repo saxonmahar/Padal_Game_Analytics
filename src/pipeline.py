@@ -1,6 +1,7 @@
 import cv2
 import os
 from src.detector import Detector
+from src.tracker import Tracker
 
 
 class Pipeline:
@@ -9,11 +10,10 @@ class Pipeline:
         self.model_path = model_path
         self.output_dir = output_dir
 
-        # Create output folder if not exists
         os.makedirs(self.output_dir, exist_ok=True)
 
-        # Initialize detector
         self.detector = Detector(self.model_path)
+        self.tracker = Tracker()
 
         print("📦 Pipeline initialized")
         print(f"Video: {self.video_path}")
@@ -23,28 +23,23 @@ class Pipeline:
     def run(self):
         print("🎬 Running padel analytics pipeline...")
 
-        # STEP 1: Load video (FIXED - use self.video_path)
         cap = cv2.VideoCapture(self.video_path)
 
         if not cap.isOpened():
             print("❌ Error: Cannot open video")
             return
 
-        # Video properties
         fps = cap.get(cv2.CAP_PROP_FPS)
         width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
         height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
 
-        # Output video path
         output_path = os.path.join(self.output_dir, "output_annotated.mp4")
 
-        # Video writer
         fourcc = cv2.VideoWriter_fourcc(*'mp4v')
         out = cv2.VideoWriter(output_path, fourcc, fps, (width, height))
 
         frame_count = 0
 
-        # STEP 2: Process frames
         while True:
             ret, frame = cap.read()
             if not ret:
@@ -52,26 +47,28 @@ class Pipeline:
 
             frame_count += 1
 
-            # STEP 3: Detection
-            results = self.detector.detect(frame)
+            # 🔥 REAL TRACKING USING YOLO TRACK MODE
+            results = self.detector.model.track(
+                frame,
+                persist=True,
+                tracker="bytetrack.yaml",
+                verbose=False
+            )
 
-            # Draw detections on frame (IMPORTANT FIX)
-            annotated_frame = results[0].plot()
+            result = results[0]
 
-            # Save frame to output video
+            # Draw boxes + IDs
+            annotated_frame = result.plot()
+
             out.write(annotated_frame)
 
             print(f"Processing frame {frame_count}")
 
-        # Cleanup
         cap.release()
         out.release()
 
-        # STEP 4: Analytics placeholder
-        print("Generating analytics...")
-
-        # STEP 5: Save results placeholder
-        print("Saving results...")
+        print("📊 Generating analytics...")
+        print("💾 Saving results...")
 
         print("✅ Pipeline finished successfully")
         print(f"📁 Output saved at: {output_path}")

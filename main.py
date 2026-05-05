@@ -3,7 +3,7 @@ from src.pipeline import Pipeline
 
 def main():
     # Paths (you can later move these to .env)
-    video_path = "data/input_video.mp4"
+    video_path = "data/input_sample_video.mp4"
     model_path = "models/yolov8n.pt"
     output_dir = "results"
 
