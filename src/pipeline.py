@@ -77,7 +77,7 @@ class Pipeline:
                 print(f"🎾 Shot detected at frame {frame_count}: {shot}")
 
             # 🎨 VISUALIZATION
-            annotated_frame = results[0].plot()
+            annotated_frame = self.visualizer.draw(frame, results[0], shot)
             out.write(annotated_frame)
 
             print(f"Processing frame {frame_count}")

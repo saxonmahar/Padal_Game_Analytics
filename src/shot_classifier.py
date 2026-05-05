@@ -1,70 +1,85 @@
+import math
+
+
 class ShotClassifier:
     def __init__(self):
         print("🎾 Shot Classifier initialized")
 
-        self.ball_history = []
+        self.history = []
         self.shots = []
 
     def update(self, frame_id, results):
-        """
-        Analyze ball/player motion and classify simple shot types (rule-based).
-        """
-
         result = results[0]
         boxes = result.boxes
 
-        ball_detected = False
+        ball_position = None
         players = 0
 
         if boxes is not None:
             for box in boxes:
                 cls = int(box.cls[0])
 
-                # COCO class mapping (YOLO)
-                # 0 = person, 32 = sports ball
+                # person
                 if cls == 0:
                     players += 1
 
+                # sports ball
                 if cls == 32:
-                    ball_detected = True
+                    x1, y1, x2, y2 = box.xyxy[0]
+                    cx = float((x1 + x2) / 2)
+                    cy = float((y1 + y2) / 2)
+                    ball_position = (cx, cy)
 
-        # Store frame state
-        frame_state = {
+        # store frame info
+        frame_data = {
             "frame_id": frame_id,
-            "ball_detected": ball_detected,
-            "players": players
+            "players": players,
+            "ball_position": ball_position
         }
 
-        self.ball_history.append(frame_state)
+        self.history.append(frame_data)
 
-        # Simple rule-based shot logic (basic version)
-        shot_type = self._classify_shot()
+        # classify shot
+        shot = self._classify()
 
-        if shot_type:
+        if shot:
             self.shots.append({
                 "frame_id": frame_id,
-                "shot_type": shot_type
+                "shot_type": shot
             })
 
-        return shot_type
+        return shot
 
-    def _classify_shot(self):
-        """
-        Very simple heuristic-based classification.
-        (Will be improved later using ball speed + trajectory)
-        """
-
-        if len(self.ball_history) < 3:
+    def _classify(self):
+        if len(self.history) < 3:
             return None
 
-        last = self.ball_history[-1]
-        prev = self.ball_history[-2]
+        last = self.history[-1]
+        prev = self.history[-2]
 
-        # Example logic (placeholder)
-        if last["ball_detected"] and not prev["ball_detected"]:
-            return "serve"
+        if not last["ball_position"] or not prev["ball_position"]:
+            return None
 
-        if last["players"] >= 2 and last["ball_detected"]:
+        x1, y1 = prev["ball_position"]
+        x2, y2 = last["ball_position"]
+
+        dx = x2 - x1
+        dy = y2 - y1
+
+        speed = math.sqrt(dx**2 + dy**2)
+
+        # 🔥 RULES (tune these thresholds)
+
+        # 1. Smash → fast downward motion
+        if dy > 15 and speed > 20:
+            return "smash"
+
+        # 2. Lob → upward motion
+        if dy < -10:
+            return "lob"
+
+        # 3. Rally → moderate movement + players active
+        if speed > 5 and last["players"] >= 2:
             return "rally"
 
         return None
