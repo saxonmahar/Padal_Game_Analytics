@@ -8,6 +8,7 @@ from src.analytics import Analytics
 from src.shot_classifier import ShotClassifier
 from src.visualizer import Visualizer
 
+
 class Pipeline:
     def __init__(self, video_path, model_path, output_dir):
         self.video_path = video_path
@@ -16,17 +17,13 @@ class Pipeline:
 
         os.makedirs(self.output_dir, exist_ok=True)
 
-        # Initialize modules
         self.detector = Detector(self.model_path)
-        self.tracker = Tracker()  # ✅ Ball tracking
+        self.tracker = Tracker()
         self.analytics = Analytics()
         self.shot_classifier = ShotClassifier()
         self.visualizer = Visualizer()
 
         print("📦 Pipeline initialized")
-        print(f"Video: {self.video_path}")
-        print(f"Model: {self.model_path}")
-        print(f"Output: {self.output_dir}")
 
     def run(self):
         print("🎬 Running padel analytics pipeline...")
@@ -34,31 +31,19 @@ class Pipeline:
         cap = cv2.VideoCapture(self.video_path)
 
         if not cap.isOpened():
-            print(f"❌ Error: Cannot open video → {self.video_path}")
+            print("❌ Error opening video")
             return
 
-        # Video properties
-        fps = cap.get(cv2.CAP_PROP_FPS)
-        width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-        height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        frame_id = 0
 
-        # Output video
-        output_path = os.path.join(self.output_dir, "output_annotated.mp4")
-
-        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-        out = cv2.VideoWriter(output_path, fourcc, fps, (width, height))
-
-        frame_count = 0
-
-        # 🔁 FRAME LOOP
         while True:
             ret, frame = cap.read()
             if not ret:
                 break
 
-            frame_count += 1
+            frame_id += 1
 
-            # 🔥 YOLO TRACKING (ByteTrack)
+            # YOLO tracking
             results = self.detector.model.track(
                 frame,
                 persist=True,
@@ -66,42 +51,33 @@ class Pipeline:
                 verbose=False
             )
 
-            # 🟢 CUSTOM BALL TRACKING (NEW)
-            self.tracker.update(frame_count, results)
+            # 🔵 BALL TRACKING
+            ball_history = self.tracker.update(frame_id, results)
 
             # 📊 ANALYTICS
-            self.analytics.process(frame_count, results)
+            self.analytics.process(frame_id, results)
 
-            # 🎾 SHOT CLASSIFICATION
-            shot = self.shot_classifier.update(frame_count, results)
+            # 🎾 SHOT CLASSIFICATION (NOW USING BALL HISTORY)
+            shot = self.shot_classifier.update(frame_id, results, ball_history)
+
             if shot:
-                print(f"🎾 Shot detected at frame {frame_count}: {shot}")
+                print(f"🎾 Shot detected: {shot}")
 
             # 🎨 VISUALIZATION
-            annotated_frame = self.visualizer.draw(frame, results[0], shot)
-            out.write(annotated_frame)
+            frame = self.visualizer.draw(frame, results[0], shot)
 
-            print(f"Processing frame {frame_count}")
+            cv2.imshow("Padel Analytics", frame)
 
-        # 🔚 CLEANUP
+            if cv2.waitKey(1) & 0xFF == ord('q'):
+                break
+
         cap.release()
-        out.release()
+        cv2.destroyAllWindows()
 
-        # 📊 SAVE ANALYTICS
-        self.analytics.save_results(self.output_dir)
+        # SAVE RESULTS
+        self.analytics.save_results(self.output_dir, self.shot_classifier.get_shots())
 
-        # 🎾 SAVE SHOTS
-        shots = self.shot_classifier.get_shots()
-        with open(os.path.join(self.output_dir, "shots_detected.json"), "w") as f:
-            json.dump(shots, f, indent=4)
-
-        # 🟢 OPTIONAL: SAVE BALL TRAJECTORY (NEW)
-        trajectory = self.tracker.get_ball_trajectory()
         with open(os.path.join(self.output_dir, "ball_trajectory.json"), "w") as f:
-            json.dump(trajectory, f, indent=4)
+            json.dump(ball_history, f, indent=4)
 
-        print("📊 Generating analytics...")
-        print("💾 Saving results...")
-
-        print("✅ Pipeline finished successfully")
-        print(f"📁 Output saved at: {output_path}")
+        print("✅ Pipeline completed")
