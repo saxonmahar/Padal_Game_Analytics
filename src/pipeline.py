@@ -6,7 +6,7 @@ from src.detector import Detector
 from src.tracker import Tracker
 from src.analytics import Analytics
 from src.shot_classifier import ShotClassifier
-
+from src.visualizer import Visualizer
 
 class Pipeline:
     def __init__(self, video_path, model_path, output_dir):
@@ -21,6 +21,7 @@ class Pipeline:
         self.tracker = Tracker()  # ✅ Ball tracking
         self.analytics = Analytics()
         self.shot_classifier = ShotClassifier()
+        self.visualizer = Visualizer()
 
         print("📦 Pipeline initialized")
         print(f"Video: {self.video_path}")
