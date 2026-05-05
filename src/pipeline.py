@@ -3,6 +3,7 @@ import os
 from src.detector import Detector
 from src.tracker import Tracker
 from src.analytics import Analytics
+from src.shot_classifier import ShotClassifier
 
 
 class Pipeline:
@@ -16,6 +17,7 @@ class Pipeline:
         self.detector = Detector(self.model_path)
         self.tracker = Tracker()
         self.analytics = Analytics()
+        self.shot_classifier = ShotClassifier()  # ✅ FIXED
 
         print("📦 Pipeline initialized")
         print(f"Video: {self.video_path}")
@@ -49,7 +51,7 @@ class Pipeline:
 
             frame_count += 1
 
-            # 🔥 TRACKING (YOLO + ByteTrack)
+            # 🔥 TRACKING
             results = self.detector.model.track(
                 frame,
                 persist=True,
@@ -57,13 +59,17 @@ class Pipeline:
                 verbose=False
             )
 
-            result = results[0]
-
-            # 📊 ANALYTICS
+            # 📊 ANALYTICS (per frame)
             self.analytics.process(frame_count, results)
 
+            # 🎾 SHOT CLASSIFICATION (per frame) ✅ FIXED
+            shot = self.shot_classifier.update(frame_count, results)
+
+            if shot:
+                print(f"🎾 Shot detected at frame {frame_count}: {shot}")
+
             # 🎨 VISUALIZATION
-            annotated_frame = result.plot()
+            annotated_frame = results[0].plot()
 
             out.write(annotated_frame)
 
@@ -72,8 +78,14 @@ class Pipeline:
         cap.release()
         out.release()
 
-        # 📊 SAVE ANALYTICS AFTER LOOP
+        # 📊 SAVE RESULTS
         self.analytics.save_results(self.output_dir)
+
+        # 🎾 SAVE SHOTS
+        shots = self.shot_classifier.get_shots()
+        import json
+        with open(os.path.join(self.output_dir, "shots_detected.json"), "w") as f:
+            json.dump(shots, f, indent=4)
 
         print("📊 Generating analytics...")
         print("💾 Saving results...")
