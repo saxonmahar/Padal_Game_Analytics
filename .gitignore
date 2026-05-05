@@ -1,17 +1,26 @@
-# Virtual environment
-venv/
+# Environment
 env/
-.venv/
+.env/
 
-# Environment variables
-.env
+# Models
+models/
+*.pt
 
+# Data
+data/
+*.mp4
+*.avi
+
+# Results
+results/
+
+# Python cache
 __pycache__/
 *.pyc
 
-.DS_Store
-Thumbs.db
-
+# IDE
 .vscode/
 .idea/
 
+# OS files
+.DS_Store
