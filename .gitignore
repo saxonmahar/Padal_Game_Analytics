@@ -1,0 +1,17 @@
+# Virtual environment
+venv/
+env/
+.venv/
+
+# Environment variables
+.env
+
+__pycache__/
+*.pyc
+
+.DS_Store
+Thumbs.db
+
+.vscode/
+.idea/
+
