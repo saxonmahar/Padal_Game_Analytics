@@ -2,6 +2,7 @@ import cv2
 import os
 from src.detector import Detector
 from src.tracker import Tracker
+from src.analytics import Analytics
 
 
 class Pipeline:
@@ -14,6 +15,7 @@ class Pipeline:
 
         self.detector = Detector(self.model_path)
         self.tracker = Tracker()
+        self.analytics = Analytics()
 
         print("📦 Pipeline initialized")
         print(f"Video: {self.video_path}")
@@ -47,7 +49,7 @@ class Pipeline:
 
             frame_count += 1
 
-            # 🔥 REAL TRACKING USING YOLO TRACK MODE
+            # 🔥 TRACKING (YOLO + ByteTrack)
             results = self.detector.model.track(
                 frame,
                 persist=True,
@@ -57,7 +59,10 @@ class Pipeline:
 
             result = results[0]
 
-            # Draw boxes + IDs
+            # 📊 ANALYTICS
+            self.analytics.process(frame_count, results)
+
+            # 🎨 VISUALIZATION
             annotated_frame = result.plot()
 
             out.write(annotated_frame)
@@ -66,6 +71,9 @@ class Pipeline:
 
         cap.release()
         out.release()
+
+        # 📊 SAVE ANALYTICS AFTER LOOP
+        self.analytics.save_results(self.output_dir)
 
         print("📊 Generating analytics...")
         print("💾 Saving results...")
