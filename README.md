@@ -1,69 +1,77 @@
-# 🎾 Padel Game Analytics — Shot Classification System
-# 🎾 Padel Game Analytics — Shot Classification System
+# Padel Game Analytics — Shot Classification System
 
-<p align="center">
-  <img src="https://capsule-render.vercel.app/api?type=waving&color=0:0D1117,50:1a1f2e,100:0D1117&height=180&section=header&text=Padel%20Analytics&fontColor=58a6ff&fontSize=42&fontAlignY=38&desc=Computer%20Vision%20%7C%20YOLOv8%20%7C%20Tracking%20%7C%20Shot%20Analysis&descAlignY=58&descSize=16&descColor=8b949e&animation=fadeIn" />
-</p>
+## Overview
 
-<p align="center">
-  <img src="https://readme-typing-svg.demolab.com?font=Fira+Code&weight=500&size=20&duration=3000&pause=800&color=58A6FF&center=true&vCenter=true&width=700&lines=YOLOv8+Object+Detection+%2B+ByteTrack;Ball+Trajectory+%26+Shot+Classification;Real-Time+Padel+Match+Analytics;Computer+Vision+End-to-End+Pipeline" />
-</p>
+This project is an end-to-end computer vision system for analyzing padel tennis match footage. It detects and tracks players and the ball, performs basic shot classification, and generates structured match analytics and visual insights.
+
+The system is built using YOLOv8 for object detection, ByteTrack for tracking, and rule-based logic for initial shot classification.
 
 ---
 
-## 🚀 Project Overview
+## Objectives
 
-This project is a **Computer Vision-based Padel Match Analytics System** that:
-
-- 🎯 Detects players & ball using YOLOv8  
-- 🏃 Tracks ball trajectory across frames  
-- 🎾 Classifies shots (smash, lob, rally)  
-- 📊 Generates analytics (CSV + JSON + dashboard)  
-- 🎥 Outputs annotated match video  
-
----
-
-## ⚙️ Tech Stack
-
-<p align="center">
-
-<img src="https://img.shields.io/badge/Python-3776AB?style=for-the-badge&logo=python&logoColor=white"/>
-<img src="https://img.shields.io/badge/YOLOv8-111111?style=for-the-badge&logo=opencv&logoColor=white"/>
-<img src="https://img.shields.io/badge/OpenCV-5C3EE8?style=for-the-badge&logo=opencv&logoColor=white"/>
-<img src="https://img.shields.io/badge/Matplotlib-11557c?style=for-the-badge"/>
-<img src="https://img.shields.io/badge/Pandas-150458?style=for-the-badge"/>
-<img src="https://img.shields.io/badge/NumPy-013243?style=for-the-badge"/>
-
-</p>
+- Detect players and ball from match video
+- Track ball movement across frames
+- Classify basic shot types (smash, lob, rally)
+- Generate structured analytical outputs
+- Produce annotated video with overlays
+- Generate statistical dashboards for insights
 
 ---
 
-## 📁 Project Structure
+## System Architecture
 
-```bash
+The pipeline follows a sequential processing workflow:
+
+1. Video input is loaded into the pipeline
+2. YOLOv8 detects players and ball
+3. ByteTrack assigns consistent object identities across frames
+4. Ball trajectory is computed from frame-level positions
+5. Rule-based logic classifies shots (smash, lob, rally)
+6. Frame-wise analytics are recorded in structured format
+7. Matplotlib generates performance dashboards
+8. Final annotated video is exported
+
+---
+
+## Technology Stack
+
+- Python (core implementation)
+- YOLOv8 (object detection)
+- OpenCV (video processing)
+- ByteTrack (multi-object tracking)
+- Pandas (data processing and storage)
+- NumPy (numerical computation)
+- Matplotlib (data visualization)
+
+---
+
+## Project Structure
+
+
 padel-analytics/
 │
 ├── src/
-│   ├── detector.py
-│   ├── tracker.py
-│   ├── shot_classifier.py
-│   ├── analytics.py
-│   ├── visualizer.py
-│   └── pipeline.py
+│ ├── detector.py
+│ ├── tracker.py
+│ ├── shot_classifier.py
+│ ├── analytics.py
+│ ├── visualizer.py
+│ └── pipeline.py
 │
 ├── data/
-│   └── input_video.mp4
+│ └── input_video.mp4
 │
 ├── models/
-│   └── yolov8n.pt
+│ └── yolov8n.pt
 │
 ├── results/
-│   ├── shots.json
-│   ├── shots.csv
-│   ├── summary.json
-│   ├── dashboard.png
-│   ├── ball_trajectory.json
-│   └── output_annotated.mp4
+│ ├── shots.json
+│ ├── shots.csv
+│ ├── summary.json
+│ ├── ball_trajectory.json
+│ ├── dashboard.png
+│ └── output_annotated.mp4
 │
 ├── main.py
 ├── demo_mode.py
@@ -71,65 +79,64 @@ padel-analytics/
 └── README.md
 
 
-## 🔥 Pipeline Workflow
 
-- 🎥 Load padel match video  
-- 🧠 YOLOv8 detects players & ball  
-- 🏃 ByteTrack tracks objects  
-- 📍 Ball trajectory computed  
-- 🎾 Shot classification (rule-based)  
-- 📊 Analytics stored (frame-wise stats)  
-- 📈 Dashboard generated (matplotlib)  
-- 🎬 Annotated video exported  
+
+
 
 ---
 
-## 📊 Output Files
+## Output Artifacts
 
-- `shots.json` → shot events  
-- `shots.csv` → frame-level analytics  
-- `summary.json` → overall stats  
-- `ball_trajectory.json` → ball movement path  
-- `dashboard.png` → visualization graphs  
-- `output_annotated.mp4` → final processed video  
+The system generates the following outputs:
 
----
-
-## ✨ Features Implemented
-
-- ✔ Player detection  
-- ✔ Ball detection  
-- ✔ Ball tracking (trajectory)  
-- ✔ Shot classification (smash / lob / rally)  
-- ✔ Real-time visualization  
-- ✔ Analytics dashboard  
-- ✔ Structured data export  
+- shots.json → shot-level events
+- shots.csv → frame-wise analytics
+- summary.json → overall match statistics
+- ball_trajectory.json → ball movement path
+- dashboard.png → visual analytics dashboard
+- output_annotated.mp4 → processed video with overlays
 
 ---
 
-## 📈 Dashboard (Matplotlib)
+## Features Implemented
 
-The system generates:
-
-- 📊 Players detected per frame graph  
-- 🎾 Shot distribution (smash / lob / rally)  
-- 📈 Total shots overview  
-
----
-
-## 🚀 Future Improvements
-
-- 🎯 Forehand / Backhand classification (pose estimation)  
-- 🧠 Deep learning-based shot classifier  
-- 🎾 Racket detection model integration  
-- 📡 Real-time live match analysis  
-- 🏆 Rally segmentation (point start/end detection)  
+- Player detection using YOLOv8
+- Ball detection and tracking
+- Ball trajectory reconstruction
+- Rule-based shot classification (smash, lob, rally)
+- Real-time video visualization
+- Automated analytics generation
+- Structured data export (JSON and CSV)
+- Matplotlib-based dashboard generation
 
 ---
 
-## 🧠 Key Idea
+## Dashboard Analytics
 
-A real-world sports analytics system inspired by professional coaching tools, built using YOLOv8 + tracking + rule-based AI.
+The system provides visual insights including:
+
+- Player count per frame over time
+- Shot type distribution (smash, lob, rally)
+- Overall shot frequency statistics
 
 ---
 
+## Future Enhancements
+
+- Forehand and backhand classification using pose estimation
+- Deep learning-based shot classification model
+- Racket detection module integration
+- Real-time live match analysis
+- Rally segmentation and point detection system
+
+---
+
+## Key Concept
+
+This project demonstrates a practical sports analytics pipeline combining computer vision, object tracking, and rule-based reasoning to simulate real-world performance analysis systems used in sports technology.
+
+---
+
+## Summary
+
+A modular and scalable computer vision system designed to analyze padel matches, extract meaningful gameplay insights, and generate structured performance analytics.
