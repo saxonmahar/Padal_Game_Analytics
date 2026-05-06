@@ -12,10 +12,11 @@ class ShotClassifier:
         self.last_shot_frame = -30
         self.shot_cooldown = 20
 
-    def update(self, frame_id, results, ball_history):
+    def update(self, frame_id, results, ball_history, fps=30):
         """
         Assigns shot type based on ball trajectory + players.
         Ball position is taken from ball_history (hybrid detector), not YOLO boxes.
+        fps is used to compute timestamp in seconds.
         """
 
         result = results[0]
@@ -23,15 +24,22 @@ class ShotClassifier:
 
         players = 0
         player_boxes = []
+        player_ids = []
 
-        # count players and store their bounding boxes
+        # count players and store their bounding boxes + track IDs
         if boxes is not None:
-            for box in boxes:
+            for i, box in enumerate(boxes):
                 cls = int(box.cls[0])
 
                 if cls == 0:
                     players += 1
                     player_boxes.append(box.xyxy[0])
+
+                    # get track ID if available
+                    track_id = None
+                    if hasattr(boxes, "id") and boxes.id is not None:
+                        track_id = int(boxes.id[i])
+                    player_ids.append(track_id)
 
         # latest ball position from tracker history
         ball_position = None
@@ -47,9 +55,16 @@ class ShotClassifier:
         shot = self._classify(ball_history, players, player_boxes, frame_id)
 
         if shot:
+            # find nearest player ID to the ball at this frame
+            player_id = self._nearest_player_id(ball_position, player_boxes, player_ids)
+
+            timestamp = round(frame_id / fps, 2)
+
             self.shots.append({
                 "frame_id": frame_id,
-                "shot_type": shot
+                "timestamp_seconds": timestamp,
+                "shot_type": shot,
+                "player_id": player_id
             })
 
         return shot
@@ -93,7 +108,7 @@ class ShotClassifier:
             shot = "smash"
 
         # ---------------------------------------------------
-        # 2. SERVE (strong upward then downward arc, high speed)
+        # 2. SERVE (strong upward arc, high speed)
         # ---------------------------------------------------
         elif avg_dy < -10 and speed > 15:
             shot = "serve"
@@ -128,12 +143,10 @@ class ShotClassifier:
         """
 
         if not player_boxes:
-            # fallback: use ball direction
             return "forehand" if avg_dx > 0 else "backhand"
 
         ball_x = ball_pos[0]
 
-        # find nearest player by horizontal distance
         nearest_center_x = None
         min_dist = float("inf")
 
@@ -149,11 +162,36 @@ class ShotClassifier:
         if nearest_center_x is None:
             return "forehand" if avg_dx > 0 else "backhand"
 
-        # ball to the right of player = forehand side
         if ball_x >= nearest_center_x:
             return "forehand"
         else:
             return "backhand"
+
+    def _nearest_player_id(self, ball_position, player_boxes, player_ids):
+        """
+        Find the track ID of the player closest to the ball.
+        Returns track_id or None if no players detected.
+        """
+
+        if not player_boxes or ball_position is None:
+            return None
+
+        ball_x, ball_y = ball_position
+        min_dist = float("inf")
+        nearest_id = None
+
+        for box, pid in zip(player_boxes, player_ids):
+            x1, y1, x2, y2 = box
+            player_cx = float((x1 + x2) / 2)
+            player_cy = float((y1 + y2) / 2)
+
+            dist = math.sqrt((player_cx - ball_x) ** 2 + (player_cy - ball_y) ** 2)
+
+            if dist < min_dist:
+                min_dist = dist
+                nearest_id = pid
+
+        return nearest_id
 
     def get_shots(self):
         return self.shots
