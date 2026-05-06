@@ -11,9 +11,9 @@ class Visualizer:
             32: "Ball"
         }
 
-    def draw(self, frame, result, shot=None, ball_pos=None, ball_method=None, rackets=None):
+    def draw(self, frame, result, shot=None, ball_pos=None, ball_method=None, rackets=None, ball_history=None):
         """
-        Draw detections + tracking IDs + ball overlay + racket boxes + shot label
+        Draw detections + tracking IDs + ball trail + racket boxes + shot label
         """
 
         if result.boxes is not None:
@@ -82,6 +82,19 @@ class Visualizer:
                     (0, 255, 255),
                     2
                 )
+
+        # draw ball trail — last 20 positions fading from bright to dim
+        if ball_history and len(ball_history) > 1:
+            trail = ball_history[-20:]
+            for i, entry in enumerate(trail[:-1]):  # skip last — drawn as main circle
+                if entry["position"] is None:
+                    continue
+                tx, ty = int(entry["position"][0]), int(entry["position"][1])
+                # opacity increases toward the most recent position
+                alpha = (i + 1) / len(trail)
+                radius = max(2, int(5 * alpha))
+                color_intensity = int(255 * alpha)
+                cv2.circle(frame, (tx, ty), radius, (0, color_intensity, color_intensity), -1)
 
         # draw ball as circle (color shows which method detected it)
         if ball_pos:

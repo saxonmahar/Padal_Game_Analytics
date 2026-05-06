@@ -72,7 +72,7 @@ class Pipeline:
                 print(f"Shot detected: {shot} (ball via {ball_method})")
 
             # visualization
-            frame = self.visualizer.draw(frame, results[0], shot, ball_pos, ball_method, rackets)
+            frame = self.visualizer.draw(frame, results[0], shot, ball_pos, ball_method, rackets, ball_history)
 
             cv2.imshow("Padel Analytics", frame)
 
