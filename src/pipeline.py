@@ -84,7 +84,8 @@ class Pipeline:
 
         # save results
         shots = self.shot_classifier.get_shots()
-        self.analytics.save_results(self.output_dir, shots)
+        bounces = self.tracker.get_bounces()
+        self.analytics.save_results(self.output_dir, shots, bounces)
 
         if ball_history:
             with open(os.path.join(self.output_dir, "ball_trajectory.json"), "w") as f:
@@ -94,5 +95,11 @@ class Pipeline:
         if racket_history:
             with open(os.path.join(self.output_dir, "racket_tracking.json"), "w") as f:
                 json.dump(racket_history, f, indent=4)
+
+        bounces = self.tracker.get_bounces()
+        if bounces:
+            with open(os.path.join(self.output_dir, "bounces.json"), "w") as f:
+                json.dump(bounces, f, indent=4)
+            print(f"Bounces detected: {len(bounces)}")
 
         print("Pipeline completed")
