@@ -31,13 +31,16 @@ class Detector:
 
     def detect(self, frame):
         """
-        Returns YOLO results for a frame
+        Returns YOLO results with ByteTrack tracking for a frame
         """
-        return self.model(frame, verbose=False)
+        return self.model.track(frame, persist=True, verbose=False)
 
     def detect_with_ball_fallback(self, frame):
         """
-        Hybrid ball detection:
+        Hybrid ball detection with ByteTrack tracking enabled.
+        Using model.track() instead of model() gives persistent track IDs
+        for players and rackets across frames.
+
         1. Try YOLO (class 32 = sports ball)
         2. Fallback to HSV color segmentation
         3. Fallback to background subtraction (motion blob)
@@ -45,7 +48,9 @@ class Detector:
         Returns: results, ball_pos (cx, cy) or None, method string or None
         """
 
-        results = self.model(frame, verbose=False)
+        # persist=True keeps ByteTrack state between frames
+        # this is what gives consistent player/racket IDs
+        results = self.model.track(frame, persist=True, verbose=False)
         result = results[0]
 
         # -------------------------------------------
