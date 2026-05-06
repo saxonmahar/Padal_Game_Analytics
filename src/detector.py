@@ -23,6 +23,10 @@ class Detector:
         self.hsv_lower = np.array([20, 80, 80])
         self.hsv_upper = np.array([45, 255, 255])
 
+        # minimum confidence for racket detection (class 38 = tennis racket)
+        # set higher than default to reduce false positives on padel rackets
+        self.racket_conf_threshold = 0.45
+
         print("Hybrid detector ready (YOLO + OpenCV fallback)")
 
     def detect(self, frame):
@@ -78,6 +82,56 @@ class Detector:
             return results, ball_pos, "motion"
 
         return results, None, None
+
+    def detect_rackets(self, result):
+        """
+        Extract racket detections from YOLO result.
+        Uses COCO class 38 (tennis racket) with a higher confidence threshold
+        to reduce false positives on padel rackets.
+
+        Returns list of dicts: {cx, cy, x1, y1, x2, y2, conf, track_id}
+        """
+
+        rackets = []
+
+        if result.boxes is None:
+            return rackets
+
+        boxes = result.boxes
+
+        for i, box in enumerate(boxes):
+            cls = int(box.cls[0])
+
+            if cls != 38:
+                continue
+
+            conf = float(box.conf[0])
+
+            # skip low confidence detections
+            if conf < self.racket_conf_threshold:
+                continue
+
+            x1, y1, x2, y2 = box.xyxy[0]
+            cx = float((x1 + x2) / 2)
+            cy = float((y1 + y2) / 2)
+
+            # tracking ID if available
+            track_id = None
+            if hasattr(boxes, "id") and boxes.id is not None:
+                track_id = int(boxes.id[i])
+
+            rackets.append({
+                "cx": cx,
+                "cy": cy,
+                "x1": float(x1),
+                "y1": float(y1),
+                "x2": float(x2),
+                "y2": float(y2),
+                "conf": round(conf, 2),
+                "track_id": track_id
+            })
+
+        return rackets
 
     def _detect_ball_hsv(self, frame):
         """
