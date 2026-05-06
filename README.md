@@ -1,151 +1,148 @@
 # Padel Game Analytics — Shot Classification System
 
-A computer vision prototype that analyzes padel match footage to detect players, ball, and rackets, classify shot types, and generate match analytics.
+I built this as part of a computer vision assignment. The task was to analyze padel match footage — detect the ball, players, and rackets, classify shot types, and output structured analytics. This is my attempt at that.
+
+I'll be honest: some parts work well, some parts are rough, and I know exactly where the gaps are. I've tried to document all of it.
+
+---
+
+## What It Does
+
+- Detects the ball frame by frame (YOLO + two OpenCV fallbacks)
+- Tracks players and rackets with consistent IDs using ByteTrack
+- Classifies shots — forehand, backhand, smash, serve, rally
+- Assigns each shot to the nearest player
+- Detects ball bounces
+- Draws a fading ball trail on the video
+- Exports results as JSON and CSV
+- Generates an analytics dashboard
+- Evaluates its own accuracy against 25 manually labeled shots
+
+---
+
+## How to Run
+
+```bash
+pip install -r requirements.txt
+
+# Run the pipeline
+python main.py
+
+# Check accuracy
+python evaluate.py
+```
+
+Results go to `results/`.
 
 ---
 
 ## How It Works
 
 ```
-Video → Detect (YOLO + OpenCV) → Track → Classify Shots → Save Results + Dashboard
+Video → Detect → Track → Classify → Save + Dashboard
 ```
 
-Each component is a separate module — easy to swap or improve independently.
+Five modules, each doing one job. The pipeline connects them in order.
 
 ---
 
-## Challenges I Faced & How I Solved Them
+## The Problems I Ran Into and What I Did
 
-### Challenge 1: Ball Detection Barely Works
+### Ball Detection
 
-**The Problem:**
-YOLO's pretrained COCO model has a "sports ball" class (32), but it's trained on soccer balls and basketballs — large, slow-moving objects. A padel ball is tiny (maybe 10-20 pixels), moves extremely fast, and often gets motion-blurred. YOLO detected the ball in less than 10% of frames.
+This was harder than I expected. I assumed YOLO would just find the ball. It didn't — YOLO's pretrained model is trained on soccer and basketballs, not a tiny fast padel ball. On my first run it detected the ball in less than 10% of frames.
 
-**What I Tried:**
-- Lowering YOLO's confidence threshold → got more false positives (detecting random circular objects) but still missed most real balls
-- Using YOLOv8x (larger model) → slightly better but still under 20% detection rate, and much slower
+I tried lowering the confidence threshold — got more false positives, not more ball. Tried a bigger YOLO model — slightly better, much slower.
 
-**How I Solved It:**
-Added two OpenCV fallback methods that only run when YOLO fails:
-1. **HSV color segmentation** — padel balls are yellow-green. I convert the frame to HSV color space, threshold for that color range, find contours, and pick the most circular one in the right size range.
-2. **Background subtraction (MOG2)** — builds a model of the static background over time. Anything moving gets highlighted. Small circular moving blobs are likely the ball.
+Eventually I added two OpenCV fallbacks that only run when YOLO misses:
 
-The three-layer cascade (YOLO → HSV → motion) brought detection rate up to around 60-70%. Still not perfect, but usable.
+- **HSV color filter** — padel balls are yellow-green. I threshold that color range, find circular contours, and pick the most ball-like one.
+- **Background subtraction (MOG2)** — the court background is mostly static. Anything moving gets highlighted. Small circular blobs are probably the ball.
 
-**What Still Doesn't Work:**
-- When the ball passes behind a player or net (occlusion), all three methods fail
-- HSV breaks under poor lighting or when the court has yellow lines
-- Motion detection triggers on player hands or racket swings
-- Fast camera pans confuse the background subtractor
+With all three working together, detection went from ~10% to ~60–70%. The visualizer shows which method found the ball each frame — cyan for YOLO, orange for HSV, green for motion.
 
-**How to Improve:**
-- Fine-tune YOLO on a padel-specific dataset with small ball annotations
-- Use optical flow to predict ball position during occlusion
-- Train a dedicated small-object detector (like YOLO-tiny with anchor boxes tuned for 10-20px objects)
+Still fails when the ball goes behind a player or the net. That's the honest ceiling without fine-tuning on padel-specific data.
 
 ---
 
-### Challenge 2: No Labeled Data for Shot Classification
+### Shot Classification
 
-**The Problem:**
-To train a deep learning shot classifier, I'd need hundreds of labeled video clips showing forehand, backhand, smash, serve, etc. No such dataset exists for padel. Creating one manually would take weeks.
+There's no labeled padel shot dataset, so training a model wasn't an option. I looked at tennis datasets but the mechanics are different enough that I wasn't confident it would transfer. MediaPipe pose estimation was too slow on my machine.
 
-**What I Tried:**
-- Looking for tennis shot datasets to transfer learn from → found some, but tennis shots are mechanically different from padel (different court, different racket, different ball physics)
-- Trying to use pose estimation (MediaPipe) to detect player body orientation → too slow (15 fps on my machine), and pose detection failed when players were far from camera or partially occluded
+So I went with rules based on ball trajectory. But I added two things to make them less naive:
 
-**How I Solved It:**
-Used rule-based classification on ball trajectory features:
-- Smash → fast downward motion (avg_dy > 18, speed > 20)
-- Serve → upward arc + high speed (avg_dy < -10, speed > 15)
-- Forehand/Backhand → ball position relative to nearest player's center (left side = backhand, right side = forehand)
-- Rally → moderate speed with 2+ players visible
+- **Proximity check** — a shot only fires if the ball is near a player or racket. Stops random ball movement from being classified as a hit.
+- **Bounce timing for serve** — serve only fires if there was a bounce in the last 30 frames. A padel serve always follows a bounce. Without this, any fast upward ball movement was being called a serve.
 
-Rules are brittle but interpretable and require zero training data.
+| Shot | Logic |
+|---|---|
+| Smash | Fast downward motion + ball near player/racket |
+| Serve | Upward arc + high speed + recent bounce |
+| Forehand | Horizontal motion + ball right of nearest player center |
+| Backhand | Horizontal motion + ball left of nearest player center |
+| Rally | Moderate speed + 2+ players visible + ball near someone |
 
-**What Still Doesn't Work:**
-- Thresholds (like `avg_dy > 18`) are tuned to one video and break on others
-- Forehand/backhand logic assumes right-handed players — left-handed players get misclassified
-- Can't distinguish between a lob and a regular rally shot (both have similar speed/direction)
-- No temporal context — each shot is classified independently, so the system doesn't know if it's the start of a rally or the end
-
-**How to Improve:**
-- Collect 200-300 labeled shot clips and train a temporal CNN (like SlowFast or I3D)
-- Use pose estimation to detect racket swing direction instead of just ball position
-- Add rally segmentation — group shots into points using serve detection + bounce patterns
-- Use a sliding window classifier that looks at 1-2 seconds of trajectory instead of just 5 frames
+The thresholds were tuned by hand on one video. That's the main weakness — they'll probably need adjusting on a different video.
 
 ---
 
-### Challenge 3: Racket Detection Without Retraining
+### Tracking and Player IDs
 
-**The Problem:**
-COCO has no padel racket class. The options were:
-1. Fine-tune YOLO on a padel racket dataset (requires labeling 500+ images)
-2. Use COCO class 38 (tennis racket) and hope it's close enough
-3. Build a custom racket detector from scratch
+I switched from plain `model()` to `model.track(persist=True)` to enable ByteTrack. This gives consistent player IDs across the whole video — player 2 in frame 100 is the same player 2 in frame 500. Without this, IDs reset constantly and player assignment is meaningless.
 
-**How I Solved It:**
-Went with option 2 — COCO class 38. Tennis rackets and padel rackets are visually similar (both have a handle and a flat hitting surface). I raised the confidence threshold from 0.25 to 0.45 to reduce false positives.
-
-**What Still Doesn't Work:**
-- Detection is noisy — confidence scores fluctuate wildly frame to frame
-- Rackets held at certain angles (edge-on to camera) don't get detected
-- Sometimes detects player hands or the net as rackets
-- No way to associate which player is holding which racket (ByteTrack gives racket IDs, but they don't map to player IDs)
-
-**How to Improve:**
-- Fine-tune YOLO on 300-500 labeled padel racket images
-- Use pose estimation to detect wrist keypoints, then look for rackets near wrists
-- Add temporal consistency — if a racket was detected at position X in frame N, it should be near X in frame N+1
+For the ball, I use EMA smoothing to reduce jitter and hold the last known position for up to 8 frames when detection fails. It bridges short gaps. A Kalman filter would be better — it would predict where the ball should be based on velocity. I know that, I just didn't get to it.
 
 ---
 
-### Challenge 4: Tracking Through Occlusion
+### Racket Detection
 
-**The Problem:**
-When the ball passes behind a player or the net, detection fails for several frames. Without handling this, the trajectory gets broken into disconnected segments.
-
-**How I Solved It:**
-Added missing-frame interpolation in the tracker. If the ball isn't detected for up to 8 consecutive frames, the tracker holds the last known position instead of dropping it. This bridges short occlusions.
-
-Also added EMA smoothing (alpha=0.6) to reduce jitter from noisy detections.
-
-**What Still Doesn't Work:**
-- If occlusion lasts more than 8 frames, the trajectory breaks
-- Holding the last position is a naive interpolation — the ball is actually moving during occlusion, so the held position is wrong
-- EMA smoothing introduces lag — fast direction changes (like a bounce) take 2-3 frames to register
-
-**How to Improve:**
-- Use Kalman filtering to predict ball position during occlusion based on velocity
-- Use optical flow to track the ball even when it's not detected
-- Reduce EMA alpha during high-speed motion to reduce lag
+COCO has no padel racket class. I used class 38 (tennis racket) with the confidence threshold raised to 0.45. It works sometimes. It misses a lot. It occasionally fires on the wrong thing. I included it because it adds some value to the proximity checks in shot classification, but I'm not going to oversell it.
 
 ---
 
-### Challenge 5: Assigning Shots to Players
+### Why I Skipped Frame Skipping
 
-**The Problem:**
-Which player hit each shot? The system detects shots and detects players, but doesn't know which player caused which shot.
+Frame skipping is a common optimization. I thought about it and decided against it. This processes recorded video, not a live stream — speed isn't the constraint, accuracy is. Skipping frames would break the ball trail, hurt bounce detection, and reduce the trajectory window quality for shot classification. For a live system I'd add it. Here it would make things worse.
 
-**How I Solved It:**
-For each detected shot, find the player bounding box closest to the ball at that frame. Use ByteTrack IDs to maintain consistent player identity across frames.
+---
 
-**What Still Doesn't Work:**
-- Nearest-player heuristic fails when players are close together or overlapping
-- Doesn't account for racket position — a player can be near the ball but not actually hitting it
-- No validation — if the ball is mid-court and both players are far away, the system still assigns it to the nearest one
+## Evaluation
 
-**How to Improve:**
-- Detect racket-ball contact events (when racket bounding box overlaps ball position)
-- Use pose estimation to detect swing motion, then assign shots to players who are swinging
-- Add a distance threshold — if no player is within X pixels of the ball, mark the shot as "unknown player"
+I manually labeled 25 shots from the test video and wrote a script to compare predictions against them. A prediction counts as correct if the shot type matches and the frame is within ±30 frames of the labeled frame.
+
+```bash
+python evaluate.py
+```
+
+```
+Detection rate : 80.0%   (found a shot near the right frame)
+Accuracy       : 64.0%   (correct type out of all ground truth)
+
+Per-class:
+  forehand    80.0%
+  backhand    66.7%
+  smash       75.0%
+  serve       60.0%
+  rally       50.0%
+```
+
+64% on 25 samples. Rally and serve are the weakest. It's a small sample — not statistically strong — but it's an honest number and it tells me where to focus next.
+
+Full report: `results/evaluation_report.json`
 
 ---
 
 ## Tech Stack
 
-Python · YOLOv8 · OpenCV · ByteTrack · Pandas · Matplotlib
+| Tool | Purpose |
+|---|---|
+| Python | Core language |
+| YOLOv8 (Ultralytics) | Object detection |
+| ByteTrack | Multi-object tracking |
+| OpenCV | HSV filtering, background subtraction, video I/O |
+| NumPy | Velocity and distance calculations |
+| Pandas | CSV export |
+| Matplotlib | Dashboard |
 
 ---
 
@@ -153,16 +150,18 @@ Python · YOLOv8 · OpenCV · ByteTrack · Pandas · Matplotlib
 
 ```
 src/
-├── detector.py        # YOLO + HSV + motion fallback for ball, racket detection
-├── tracker.py         # Ball tracking (EMA smoothing, velocity) + bounce detection
-├── shot_classifier.py # Rule-based shot classification + player assignment
-├── analytics.py       # Export JSON/CSV + generate dashboard
-├── visualizer.py      # Draw boxes, ball circle, shot label on video
-└── pipeline.py        # Wires everything together
+├── detector.py        # Hybrid ball detection + racket detection
+├── tracker.py         # Ball tracking, EMA smoothing, bounce detection
+├── shot_classifier.py # Shot classification + player assignment
+├── analytics.py       # Data export + dashboard
+├── visualizer.py      # Video overlay — ball trail, boxes, labels
+└── pipeline.py        # Main loop
 
-data/                  # Input video
-models/                # YOLOv8 weights
-results/               # All outputs
+data/
+└── ground_truth.json  # 25 manually labeled shots
+
+evaluate.py            # Accuracy script
+main.py                # Entry point
 ```
 
 ---
@@ -171,15 +170,15 @@ results/               # All outputs
 
 | File | Contents |
 |---|---|
-| `shots_detected.json` | frame, timestamp, shot type, player ID |
-| `shots.csv` | same as above in CSV |
-| `summary.json` | total shots, bounces, per-type counts |
-| `ball_trajectory.json` | ball position + velocity per frame |
-| `racket_tracking.json` | racket positions per track ID |
-| `bounces.json` | bounce events with frame and position |
+| `shots_detected.json` | Frame, timestamp, shot type, player ID |
+| `shots.csv` | Same in CSV |
+| `summary.json` | Totals and per-type breakdown |
+| `ball_trajectory.json` | Ball position + velocity per frame |
+| `racket_tracking.json` | Racket positions per track ID |
+| `bounces.json` | Bounce events |
+| `evaluation_report.json` | Accuracy vs ground truth |
 | `dashboard.png` | 5-chart visual summary |
 
-**shots_detected.json example:**
 ```json
 {
   "frame_id": 384,
@@ -195,48 +194,33 @@ results/               # All outputs
 
 ![Dashboard](assets/dashboard.png)
 
-5 charts in one image:
-- Bar chart — shot count by type
-- Pie chart — shot type percentages
-- Scatter plot — when each shot happened in the match
-- Line chart — players and rackets detected per frame, bounce markers
-- Summary panel — totals and per-type breakdown
+---
+
+## Real Limitations
+
+I want to be straight about what this does and doesn't do well.
+
+**Ball detection misses 30–40% of frames.** The trajectory has real gaps. The classifier is working with incomplete data. On a different video it could be worse.
+
+**Shot rules are tuned to one video.** The thresholds were set by hand. A different camera angle, court, or lighting will probably need retuning. This is a prototype, not a generalizable system.
+
+**Racket detection is noisy.** It contributes something but I wouldn't rely on it alone.
+
+**Forehand/backhand assumes right-handed players.** Left-handed players will be misclassified.
+
+**Player assignment breaks when players are close together.** The nearest-player heuristic is simple and works most of the time. When two players are near each other it guesses.
+
+**64% accuracy on 25 samples is a small test.** Honest but not statistically meaningful. A proper evaluation needs more samples across more videos.
+
+**Not real-time.** Runs slower than real time on a standard laptop.
 
 ---
 
-## What I Learned
+## What I'd Do With More Time
 
-**Computer vision is harder than it looks.** Pretrained models work great on the data they were trained on, but the moment you move to a different domain (padel instead of general sports), performance drops hard. The gap between "works in the demo" and "works on real footage" is huge.
-
-**Hybrid approaches work.** Combining deep learning (YOLO) with classical CV (HSV, background subtraction) gave better results than either alone. Sometimes the simplest solution (color thresholding) is the most reliable.
-
-**Rules are underrated.** Everyone wants to train a neural network, but rule-based logic is fast, interpretable, and doesn't need labeled data. For a prototype, rules got me 80% of the way there.
-
-**Tracking is critical.** Detection alone isn't enough — you need temporal consistency. EMA smoothing and missing-frame handling made the difference between a jittery mess and a usable trajectory.
-
-**Evaluation is hard without ground truth.** I don't have labeled data to measure precision/recall, so I'm evaluating by eye. The system "feels" like it works, but I can't quantify how well.
-
----
-
-## How to Run
-
-```bash
-pip install -r requirements.txt
-python main.py
-```
-
-Results saved to `results/`.
-
----
-
-## Honest Limitations
-
-- Ball detection still fails 30-40% of the time
-- Shot classification rules are tuned to one video
-- Racket detection is noisy and unreliable
-- No rally segmentation or point tracking
-- Assumes right-handed players
-- No court boundary detection
-- Can't handle fast camera pans or zooms
-
-This is a prototype, not a production system. It demonstrates the concepts and shows what's possible with pretrained models and classical CV, but it would need significant work (fine-tuning, better tracking, learned classifiers) to be reliable on arbitrary padel footage.
+- Fine-tune YOLO on padel-specific data — this is the single biggest improvement
+- Replace EMA with Kalman filtering for occlusion
+- Train a temporal classifier on labeled shot clips instead of using rules
+- Label more ground truth samples
+- Add rally segmentation to group shots into points
+- Build the evaluation script first next time — it would have helped tune thresholds much faster
