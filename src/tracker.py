@@ -18,6 +18,11 @@ class Tracker:
         # racket tracking: track_id -> list of positions
         self.racket_history = {}
 
+        # bounce detection
+        self.bounces = []
+        self.prev_dy = None
+        self.bounce_cooldown = 0
+
     def update(self, frame_id, ball_pos):
         """
         Improved ball tracking with:
@@ -81,7 +86,34 @@ class Tracker:
         # update last position
         self.last_position = current_pos
 
+        # check for bounce after storing
+        self._detect_bounce(frame_id, dy)
+
         return self.ball_history
+
+    def _detect_bounce(self, frame_id, dy):
+        """
+        Rule-based bounce detection:
+        A bounce occurs when the ball's vertical direction flips from
+        downward (dy > 0) to upward (dy < 0) — i.e. ball hits the floor and rises.
+        Cooldown prevents duplicate detections on the same bounce.
+        """
+
+        if self.bounce_cooldown > 0:
+            self.bounce_cooldown -= 1
+            self.prev_dy = dy
+            return
+
+        if self.prev_dy is not None:
+            # downward motion followed by upward motion = bounce
+            if self.prev_dy > 3 and dy < -3:
+                self.bounces.append({
+                    "frame": frame_id,
+                    "position": self.last_position
+                })
+                self.bounce_cooldown = 10  # skip next 10 frames
+
+        self.prev_dy = dy
 
     def update_rackets(self, frame_id, rackets):
         """
@@ -128,6 +160,9 @@ class Tracker:
 
     def get_racket_history(self):
         return self.racket_history
+
+    def get_bounces(self):
+        return self.bounces
 
     def get_ball_speed(self):
         if len(self.ball_history) < 1:
