@@ -3,46 +3,31 @@ import math
 
 class Tracker:
     def __init__(self):
-        print("📦 Tracker initialized (enhanced)")
+        print("Tracker initialized (enhanced)")
 
         self.ball_history = []
         self.last_position = None
 
         # smoothing factor (0 = no smoothing, closer to 1 = smoother)
-        self.alpha = 0.7  
+        self.alpha = 0.6
 
         # missing frame handling
-        self.max_missing_frames = 5
+        self.max_missing_frames = 8
         self.missing_count = 0
 
-    def update(self, frame_id, results):
+    def update(self, frame_id, ball_pos):
         """
         Improved ball tracking with:
         - smoothing (EMA)
         - missing frame handling
         - velocity calculation
+
+        ball_pos: (cx, cy) from Detector.detect_with_ball_fallback(), or None
         """
 
-        result = results[0]
-        boxes = result.boxes
+        current_pos = ball_pos
 
-        current_pos = None
-
-        # 🔍 Detect ball
-        if boxes is not None:
-            for box in boxes:
-                cls = int(box.cls[0])
-
-                # COCO: 32 = sports ball
-                if cls == 32:
-                    x1, y1, x2, y2 = box.xyxy[0]
-                    cx = float((x1 + x2) / 2)
-                    cy = float((y1 + y2) / 2)
-
-                    current_pos = (cx, cy)
-                    break
-
-        # 🧠 Handle missing ball detection
+        # handle missing ball detection
         if current_pos is None:
             self.missing_count += 1
 
@@ -55,7 +40,7 @@ class Tracker:
         else:
             self.missing_count = 0
 
-        # 🎯 Apply smoothing (EMA)
+        # apply smoothing (EMA)
         if self.last_position:
             prev_x, prev_y = self.last_position
             curr_x, curr_y = current_pos
@@ -65,7 +50,7 @@ class Tracker:
 
             current_pos = (smooth_x, smooth_y)
 
-        # ⚡ Compute velocity
+        # compute velocity
         speed = 0
         dx, dy = 0, 0
 
@@ -77,7 +62,7 @@ class Tracker:
             dy = curr_y - prev_y
             speed = math.sqrt(dx**2 + dy**2)
 
-        # 📝 Store data
+        # store data
         frame_data = {
             "frame": frame_id,
             "position": current_pos,
