@@ -15,6 +15,9 @@ class Tracker:
         self.max_missing_frames = 8
         self.missing_count = 0
 
+        # racket tracking: track_id -> list of positions
+        self.racket_history = {}
+
     def update(self, frame_id, ball_pos):
         """
         Improved ball tracking with:
@@ -80,8 +83,51 @@ class Tracker:
 
         return self.ball_history
 
+    def update_rackets(self, frame_id, rackets):
+        """
+        Track racket positions per track_id across frames.
+        rackets: list of dicts from Detector.detect_rackets()
+        """
+
+        for racket in rackets:
+            track_id = racket["track_id"]
+
+            # use cx/cy as key if no track_id assigned
+            key = track_id if track_id is not None else f"untracked_{frame_id}"
+
+            if key not in self.racket_history:
+                self.racket_history[key] = []
+
+            self.racket_history[key].append({
+                "frame": frame_id,
+                "cx": racket["cx"],
+                "cy": racket["cy"],
+                "conf": racket["conf"]
+            })
+
+    def get_rackets_at_frame(self, frame_id):
+        """
+        Returns list of racket positions seen at a specific frame.
+        """
+
+        rackets_at_frame = []
+
+        for track_id, history in self.racket_history.items():
+            for entry in history:
+                if entry["frame"] == frame_id:
+                    rackets_at_frame.append({
+                        "track_id": track_id,
+                        "cx": entry["cx"],
+                        "cy": entry["cy"]
+                    })
+
+        return rackets_at_frame
+
     def get_ball_trajectory(self):
         return self.ball_history
+
+    def get_racket_history(self):
+        return self.racket_history
 
     def get_ball_speed(self):
         if len(self.ball_history) < 1:
