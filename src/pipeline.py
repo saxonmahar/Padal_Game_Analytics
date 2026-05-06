@@ -37,6 +37,12 @@ class Pipeline:
         frame_id = 0
         ball_history = []
 
+        # get video FPS for accurate timestamps
+        fps = cap.get(cv2.CAP_PROP_FPS)
+        if fps <= 0:
+            fps = 30
+        print(f"Video FPS: {fps}")
+
         while True:
             ret, frame = cap.read()
             if not ret:
@@ -60,7 +66,7 @@ class Pipeline:
             self.analytics.process(frame_id, results)
 
             # shot classification
-            shot = self.shot_classifier.update(frame_id, results, ball_history)
+            shot = self.shot_classifier.update(frame_id, results, ball_history, fps)
 
             if shot:
                 print(f"Shot detected: {shot} (ball via {ball_method})")
