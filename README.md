@@ -193,6 +193,8 @@ results/               # All outputs
 
 ## Dashboard
 
+![Dashboard](results/dashboard.png)
+
 5 charts in one image:
 - Bar chart — shot count by type
 - Pie chart — shot type percentages
