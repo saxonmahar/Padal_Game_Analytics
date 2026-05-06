@@ -47,8 +47,14 @@ class Pipeline:
             # hybrid detection: YOLO + OpenCV fallback for ball
             results, ball_pos, ball_method = self.detector.detect_with_ball_fallback(frame)
 
+            # racket detection from same YOLO result (class 38, conf filtered)
+            rackets = self.detector.detect_rackets(results[0])
+
             # ball tracking (pass pre-computed ball position)
             ball_history = self.tracker.update(frame_id, ball_pos)
+
+            # racket tracking
+            self.tracker.update_rackets(frame_id, rackets)
 
             # analytics
             self.analytics.process(frame_id, results)
@@ -60,7 +66,7 @@ class Pipeline:
                 print(f"Shot detected: {shot} (ball via {ball_method})")
 
             # visualization
-            frame = self.visualizer.draw(frame, results[0], shot, ball_pos, ball_method)
+            frame = self.visualizer.draw(frame, results[0], shot, ball_pos, ball_method, rackets)
 
             cv2.imshow("Padel Analytics", frame)
 
@@ -77,5 +83,10 @@ class Pipeline:
         if ball_history:
             with open(os.path.join(self.output_dir, "ball_trajectory.json"), "w") as f:
                 json.dump(ball_history, f, indent=4)
+
+        racket_history = self.tracker.get_racket_history()
+        if racket_history:
+            with open(os.path.join(self.output_dir, "racket_tracking.json"), "w") as f:
+                json.dump(racket_history, f, indent=4)
 
         print("Pipeline completed")
