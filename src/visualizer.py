@@ -11,9 +11,9 @@ class Visualizer:
             32: "Ball"
         }
 
-    def draw(self, frame, result, shot=None, ball_pos=None, ball_method=None):
+    def draw(self, frame, result, shot=None, ball_pos=None, ball_method=None, rackets=None):
         """
-        Draw detections + tracking IDs + ball overlay + shot label
+        Draw detections + tracking IDs + ball overlay + racket boxes + shot label
         """
 
         if result.boxes is not None:
@@ -23,8 +23,8 @@ class Visualizer:
                 x1, y1, x2, y2 = map(int, box.xyxy[0])
                 cls = int(box.cls[0])
 
-                # skip YOLO ball box — drawn separately as circle below
-                if cls == 32:
+                # skip ball and racket — drawn separately below
+                if cls in (32, 38):
                     continue
 
                 # get class name
@@ -55,6 +55,31 @@ class Visualizer:
                     cv2.FONT_HERSHEY_SIMPLEX,
                     0.5,
                     color,
+                    2
+                )
+
+        # draw racket boxes (yellow) with confidence score
+        if rackets:
+            for racket in rackets:
+                x1 = int(racket["x1"])
+                y1 = int(racket["y1"])
+                x2 = int(racket["x2"])
+                y2 = int(racket["y2"])
+                conf = racket["conf"]
+                track_id = racket["track_id"]
+
+                racket_label = f"Racket {conf:.2f}"
+                if track_id is not None:
+                    racket_label = f"Racket ID:{track_id} {conf:.2f}"
+
+                cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 255), 2)
+                cv2.putText(
+                    frame,
+                    racket_label,
+                    (x1, y1 - 10),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.5,
+                    (0, 255, 255),
                     2
                 )
 
