@@ -11,11 +11,9 @@ class ShotClassifier:
         self.last_shot_frame = -30
         self.shot_cooldown = 20
 
-    def update(self, frame_id, results, ball_history, fps=30):
+    def update(self, frame_id, results, ball_history, bounces, fps=30):
         """
-        Assigns shot type based on ball trajectory + players.
-        Ball position is taken from ball_history (hybrid detector), not YOLO boxes.
-        fps is used to compute timestamp in seconds.
+        Classifies shots using ball trajectory + player position + racket proximity + bounce timing.
         """
 
         result = results[0]
@@ -24,8 +22,8 @@ class ShotClassifier:
         players = 0
         player_boxes = []
         player_ids = []
+        racket_boxes = []
 
-        # count players and store their bounding boxes + track IDs
         if boxes is not None:
             for i, box in enumerate(boxes):
                 cls = int(box.cls[0])
@@ -34,23 +32,22 @@ class ShotClassifier:
                     players += 1
                     player_boxes.append(box.xyxy[0])
 
-                    # get track ID if available
                     track_id = None
                     if hasattr(boxes, "id") and boxes.id is not None:
                         track_id = int(boxes.id[i])
                     player_ids.append(track_id)
 
-        # latest ball position from tracker history
+                elif cls == 38:
+                    racket_boxes.append(box.xyxy[0])
+
         ball_position = None
         if ball_history:
             ball_position = ball_history[-1]["position"]
 
-        shot = self._classify(ball_history, players, player_boxes, frame_id)
+        shot = self._classify(ball_history, players, player_boxes, racket_boxes, bounces, frame_id)
 
         if shot:
-            # find nearest player ID to the ball at this frame
             player_id = self._nearest_player_id(ball_position, player_boxes, player_ids)
-
             timestamp = round(frame_id / fps, 2)
 
             self.shots.append({
@@ -62,12 +59,11 @@ class ShotClassifier:
 
         return shot
 
-    def _classify(self, ball_history, players, player_boxes, frame_id):
+    def _classify(self, ball_history, players, player_boxes, racket_boxes, bounces, frame_id):
 
         if len(ball_history) < 6:
             return None
 
-        # cooldown check — avoid duplicate detections on same hit
         if frame_id - self.last_shot_frame < self.shot_cooldown:
             return None
 
@@ -92,54 +88,97 @@ class ShotClassifier:
             for dx, dy in zip(dx_list, dy_list)
         ) / len(dx_list)
 
+        ball_pos = positions[-1]
         shot = None
 
         # ---------------------------------------------------
-        # 1. SMASH (fast downward motion)
+        # 1. SMASH
+        # Fast downward motion + ball is close to a player or racket
+        # The proximity check avoids classifying random downward
+        # ball movement (e.g. after a bounce) as a smash
         # ---------------------------------------------------
         if avg_dy > 18 and speed > 20:
-            shot = "smash"
+            if self._ball_near_player_or_racket(ball_pos, player_boxes, racket_boxes, threshold=150):
+                shot = "smash"
 
         # ---------------------------------------------------
-        # 2. SERVE (strong upward arc, high speed)
+        # 2. SERVE
+        # Upward motion + high speed + a bounce happened recently
+        # A serve in padel always follows a bounce (player drops
+        # the ball, it bounces, then they hit it upward)
         # ---------------------------------------------------
         elif avg_dy < -10 and speed > 15:
-            shot = "serve"
+            if self._recent_bounce(frame_id, bounces, within_frames=30):
+                shot = "serve"
 
         # ---------------------------------------------------
         # 3. FOREHAND / BACKHAND
-        # Uses ball position relative to nearest player center
-        # to determine which side of the body the hit came from
+        # Horizontal motion + ball close to a player or racket
+        # Proximity check ensures we're classifying an actual
+        # hit, not just the ball drifting sideways
         # ---------------------------------------------------
         elif abs(avg_dx) > 5 and speed > 4:
-            ball_pos = positions[-1]
-            shot = self._classify_forehand_backhand(ball_pos, player_boxes, avg_dx)
+            if self._ball_near_player_or_racket(ball_pos, player_boxes, racket_boxes, threshold=200):
+                shot = self._classify_forehand_backhand(ball_pos, player_boxes, avg_dx)
 
         # ---------------------------------------------------
-        # 4. DEFAULT RALLY
+        # 4. RALLY (default)
+        # Moderate speed, 2+ players visible, ball near someone
         # ---------------------------------------------------
         elif speed > 4 and players >= 2:
-            shot = "rally"
+            if self._ball_near_player_or_racket(ball_pos, player_boxes, racket_boxes, threshold=250):
+                shot = "rally"
 
         if shot:
             self.last_shot_frame = frame_id
 
         return shot
 
+    def _ball_near_player_or_racket(self, ball_pos, player_boxes, racket_boxes, threshold):
+        """
+        Returns True if the ball is within `threshold` pixels of any player
+        or racket bounding box center. This adds spatial context to shot
+        detection — we only classify a shot if someone is actually near the ball.
+        """
+
+        if ball_pos is None:
+            return False
+
+        bx, by = ball_pos
+
+        for box in player_boxes + racket_boxes:
+            x1, y1, x2, y2 = box
+            cx = float((x1 + x2) / 2)
+            cy = float((y1 + y2) / 2)
+            dist = math.sqrt((cx - bx) ** 2 + (cy - by) ** 2)
+            if dist < threshold:
+                return True
+
+        return False
+
+    def _recent_bounce(self, frame_id, bounces, within_frames=30):
+        """
+        Returns True if a bounce was detected within the last `within_frames` frames.
+        Used to validate serve detection — a serve always follows a bounce.
+        """
+
+        for bounce in bounces:
+            if 0 < frame_id - bounce["frame"] <= within_frames:
+                return True
+
+        return False
+
     def _classify_forehand_backhand(self, ball_pos, player_boxes, avg_dx):
         """
-        Determine forehand or backhand by comparing ball x position
-        to the nearest player's center x.
-        If ball is to the right of player center -> forehand (right-handed assumption)
-        If ball is to the left of player center  -> backhand
-        Falls back to direction-based if no players detected.
+        Compare ball x position to nearest player center.
+        Ball to the right of player = forehand (right-handed assumption).
+        Ball to the left = backhand.
         """
 
         if not player_boxes:
             return "forehand" if avg_dx > 0 else "backhand"
 
         ball_x = ball_pos[0]
-
         nearest_center_x = None
         min_dist = float("inf")
 
@@ -155,15 +194,11 @@ class ShotClassifier:
         if nearest_center_x is None:
             return "forehand" if avg_dx > 0 else "backhand"
 
-        if ball_x >= nearest_center_x:
-            return "forehand"
-        else:
-            return "backhand"
+        return "forehand" if ball_x >= nearest_center_x else "backhand"
 
     def _nearest_player_id(self, ball_position, player_boxes, player_ids):
         """
         Find the track ID of the player closest to the ball.
-        Returns track_id or None if no players detected.
         """
 
         if not player_boxes or ball_position is None:
@@ -177,7 +212,6 @@ class ShotClassifier:
             x1, y1, x2, y2 = box
             player_cx = float((x1 + x2) / 2)
             player_cy = float((y1 + y2) / 2)
-
             dist = math.sqrt((player_cx - ball_x) ** 2 + (player_cy - ball_y) ** 2)
 
             if dist < min_dist:

@@ -66,7 +66,7 @@ class Pipeline:
             self.analytics.process(frame_id, results)
 
             # shot classification
-            shot = self.shot_classifier.update(frame_id, results, ball_history, fps)
+            shot = self.shot_classifier.update(frame_id, results, ball_history, self.tracker.get_bounces(), fps)
 
             if shot:
                 print(f"Shot detected: {shot} (ball via {ball_method})")
