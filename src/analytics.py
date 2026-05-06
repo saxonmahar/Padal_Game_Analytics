@@ -7,7 +7,7 @@ from collections import Counter
 
 class Analytics:
     def __init__(self):
-        print("📊 Analytics module initialized")
+        print("Analytics module initialized")
 
         self.frame_data = []
         self.total_frames = 0
@@ -63,22 +63,30 @@ class Analytics:
         df.to_csv(csv_path, index=False)
 
         # ---------- SUMMARY ----------
+        # shot type breakdown
+        shot_counts = {}
+        if shots:
+            counts = Counter(s["shot_type"] for s in shots)
+            shot_counts = dict(counts)
+
         summary = {
             "total_frames": self.total_frames,
             "total_player_detections": self.total_players_detected,
             "avg_players_per_frame": round(
                 self.total_players_detected / self.total_frames, 2
-            ) if self.total_frames > 0 else 0
+            ) if self.total_frames > 0 else 0,
+            "total_shots": len(shots) if shots else 0,
+            "shot_counts": shot_counts
         }
 
         summary_path = os.path.join(output_dir, "summary.json")
         with open(summary_path, "w") as f:
             json.dump(summary, f, indent=4)
 
-        print("📊 Analytics saved:")
-        print(f"JSON → {json_path}")
-        print(f"CSV  → {csv_path}")
-        print(f"Summary → {summary_path}")
+        print("Analytics saved:")
+        print(f"  JSON    -> {json_path}")
+        print(f"  CSV     -> {csv_path}")
+        print(f"  Summary -> {summary_path}")
 
         # ---------- DASHBOARD ----------
         self._generate_dashboard(output_dir, df, shots)
@@ -90,14 +98,14 @@ class Analytics:
 
         plt.figure(figsize=(12, 8))
 
-        # 📈 Plot 1: Players per frame
+        # plot 1: players per frame
         plt.subplot(2, 1, 1)
         plt.plot(df["frame_id"], df["players_detected"])
         plt.title("Players Detected per Frame")
         plt.xlabel("Frame")
         plt.ylabel("Players")
 
-        # 📊 Plot 2: Shot distribution
+        # plot 2: shot distribution
         plt.subplot(2, 1, 2)
 
         if shots:
@@ -114,7 +122,6 @@ class Analytics:
         else:
             plt.text(0.5, 0.5, "No shots detected", ha="center")
 
-        # 🔥 Total shots
         total_shots = len(shots) if shots else 0
         plt.suptitle(f"Total Shots: {total_shots}", fontsize=16)
 
@@ -123,4 +130,4 @@ class Analytics:
         dashboard_path = os.path.join(output_dir, "dashboard.png")
         plt.savefig(dashboard_path)
 
-        print(f"📊 Dashboard saved → {dashboard_path}")
+        print(f"  Dashboard -> {dashboard_path}")
