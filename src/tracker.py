@@ -137,27 +137,6 @@ class Tracker:
                 "conf": racket["conf"]
             })
 
-    def get_rackets_at_frame(self, frame_id):
-        """
-        Returns list of racket positions seen at a specific frame.
-        """
-
-        rackets_at_frame = []
-
-        for track_id, history in self.racket_history.items():
-            for entry in history:
-                if entry["frame"] == frame_id:
-                    rackets_at_frame.append({
-                        "track_id": track_id,
-                        "cx": entry["cx"],
-                        "cy": entry["cy"]
-                    })
-
-        return rackets_at_frame
-
-    def get_ball_trajectory(self):
-        return self.ball_history
-
     def get_racket_history(self):
         return self.racket_history
 

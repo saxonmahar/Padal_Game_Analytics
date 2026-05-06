@@ -5,7 +5,6 @@ class ShotClassifier:
     def __init__(self):
         print("Shot Classifier initialized")
 
-        self.history = []
         self.shots = []
 
         # cooldown to avoid duplicate shots on same hit
@@ -45,12 +44,6 @@ class ShotClassifier:
         ball_position = None
         if ball_history:
             ball_position = ball_history[-1]["position"]
-
-        self.history.append({
-            "frame": frame_id,
-            "players": players,
-            "ball": ball_position
-        })
 
         shot = self._classify(ball_history, players, player_boxes, frame_id)
 

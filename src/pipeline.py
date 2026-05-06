@@ -96,7 +96,6 @@ class Pipeline:
             with open(os.path.join(self.output_dir, "racket_tracking.json"), "w") as f:
                 json.dump(racket_history, f, indent=4)
 
-        bounces = self.tracker.get_bounces()
         if bounces:
             with open(os.path.join(self.output_dir, "bounces.json"), "w") as f:
                 json.dump(bounces, f, indent=4)
