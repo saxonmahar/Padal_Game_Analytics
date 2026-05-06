@@ -23,18 +23,19 @@ class Pipeline:
         self.shot_classifier = ShotClassifier()
         self.visualizer = Visualizer()
 
-        print("📦 Pipeline initialized")
+        print("Pipeline initialized")
 
     def run(self):
-        print("🎬 Running padel analytics pipeline...")
+        print("Running padel analytics pipeline...")
 
         cap = cv2.VideoCapture(self.video_path)
 
         if not cap.isOpened():
-            print("❌ Error opening video")
+            print("Error opening video")
             return
 
         frame_id = 0
+        ball_history = []
 
         while True:
             ret, frame = cap.read()
@@ -43,28 +44,23 @@ class Pipeline:
 
             frame_id += 1
 
-            # YOLO tracking
-            results = self.detector.model.track(
-                frame,
-                persist=True,
-                tracker="bytetrack.yaml",
-                verbose=False
-            )
+            # hybrid detection: YOLO + OpenCV fallback for ball
+            results, ball_pos, ball_method = self.detector.detect_with_ball_fallback(frame)
 
-            # 🔵 BALL TRACKING
-            ball_history = self.tracker.update(frame_id, results)
+            # ball tracking (pass pre-computed ball position)
+            ball_history = self.tracker.update(frame_id, ball_pos)
 
-            # 📊 ANALYTICS
+            # analytics
             self.analytics.process(frame_id, results)
 
-            # 🎾 SHOT CLASSIFICATION (NOW USING BALL HISTORY)
+            # shot classification
             shot = self.shot_classifier.update(frame_id, results, ball_history)
 
             if shot:
-                print(f"🎾 Shot detected: {shot}")
+                print(f"Shot detected: {shot} (ball via {ball_method})")
 
-            # 🎨 VISUALIZATION
-            frame = self.visualizer.draw(frame, results[0], shot)
+            # visualization
+            frame = self.visualizer.draw(frame, results[0], shot, ball_pos, ball_method)
 
             cv2.imshow("Padel Analytics", frame)
 
@@ -74,10 +70,12 @@ class Pipeline:
         cap.release()
         cv2.destroyAllWindows()
 
-        # SAVE RESULTS
-        self.analytics.save_results(self.output_dir, self.shot_classifier.get_shots())
+        # save results
+        shots = self.shot_classifier.get_shots()
+        self.analytics.save_results(self.output_dir, shots)
 
-        with open(os.path.join(self.output_dir, "ball_trajectory.json"), "w") as f:
-            json.dump(ball_history, f, indent=4)
+        if ball_history:
+            with open(os.path.join(self.output_dir, "ball_trajectory.json"), "w") as f:
+                json.dump(ball_history, f, indent=4)
 
-        print("✅ Pipeline completed")
+        print("Pipeline completed")
