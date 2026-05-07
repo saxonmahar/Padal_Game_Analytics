@@ -101,9 +101,10 @@ class Visualizer:
             cx, cy = int(ball_pos[0]), int(ball_pos[1])
 
             method_colors = {
-                "yolo":   (0, 255, 255),  # cyan
-                "hsv":    (0, 165, 255),  # orange
-                "motion": (0, 255, 0),    # green
+                "yolo":       (0, 255, 255),  # cyan
+                "hsv+motion": (0, 255, 0),    # bright green — high confidence
+                "hsv":        (0, 165, 255),  # orange
+                "motion":     (128, 128, 255), # purple
             }
 
             ball_color = method_colors.get(ball_method, (255, 255, 255))

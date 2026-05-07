@@ -1,4 +1,5 @@
 import cv2
+import math
 import numpy as np
 from ultralytics import YOLO
 
@@ -62,17 +63,30 @@ class Detector:
         if ball_pos:
             return results, ball_pos, "yolo"
 
-        # 2. HSV color fallback
-        ball_pos = self._detect_ball_hsv(frame)
+        # 2. HSV + motion fusion — only accept if both methods agree
+        # A real ball is yellow-green AND moving. Court markings are
+        # yellow-green but static. Player arms move but aren't yellow-green.
+        # Requiring both conditions eliminates most false positives.
+        hsv_pos = self._detect_ball_hsv(frame)
+        motion_pos = self._detect_ball_motion(frame)
 
-        if ball_pos:
-            return results, ball_pos, "hsv"
+        if hsv_pos and motion_pos:
+            # both agree — pick the one closer to the other as confirmation
+            dist = math.sqrt(
+                (hsv_pos[0] - motion_pos[0]) ** 2 +
+                (hsv_pos[1] - motion_pos[1]) ** 2
+            )
+            # if they're within 40px of each other, high confidence
+            if dist < 40:
+                return results, hsv_pos, "hsv+motion"
 
-        # 3. Motion fallback — stricter circularity to avoid player limbs
-        ball_pos = self._detect_ball_motion(frame)
+        # 3. HSV alone as last resort (less reliable)
+        if hsv_pos:
+            return results, hsv_pos, "hsv"
 
-        if ball_pos:
-            return results, ball_pos, "motion"
+        # 4. Motion alone as last resort
+        if motion_pos:
+            return results, motion_pos, "motion"
 
         return results, None, None
 
