@@ -8,14 +8,14 @@ class Detector:
         print("Loading YOLO model...")
         self.model = YOLO(model_path)
 
-        # Background subtractor for motion-based ball fallback
+        # background subtractor for motion-based ball fallback
         self.bg_subtractor = cv2.createBackgroundSubtractorMOG2(
             history=300,
             varThreshold=40,
             detectShadows=False
         )
 
-        # Padel ball size range in pixels (tune per camera distance)
+        # padel ball size range in pixels
         self.ball_min_radius = 3
         self.ball_max_radius = 25
 
@@ -24,7 +24,6 @@ class Detector:
         self.hsv_upper = np.array([45, 255, 255])
 
         # minimum confidence for racket detection (class 38 = tennis racket)
-        # set higher than default to reduce false positives on padel rackets
         self.racket_conf_threshold = 0.45
 
         print("Hybrid detector ready (YOLO + OpenCV fallback)")
@@ -37,10 +36,7 @@ class Detector:
 
     def detect_with_ball_fallback(self, frame):
         """
-        Hybrid ball detection with ByteTrack tracking enabled.
-        Using model.track() instead of model() gives persistent track IDs
-        for players and rackets across frames.
-
+        Hybrid ball detection:
         1. Try YOLO (class 32 = sports ball)
         2. Fallback to HSV color segmentation
         3. Fallback to background subtraction (motion blob)
@@ -48,14 +44,10 @@ class Detector:
         Returns: results, ball_pos (cx, cy) or None, method string or None
         """
 
-        # persist=True keeps ByteTrack state between frames
-        # this is what gives consistent player/racket IDs
         results = self.model.track(frame, persist=True, verbose=False)
         result = results[0]
 
-        # -------------------------------------------
-        # 1. YOLO ball detection (class 32 = sports ball)
-        # -------------------------------------------
+        # 1. YOLO ball detection
         ball_pos = None
 
         if result.boxes is not None:
@@ -70,17 +62,13 @@ class Detector:
         if ball_pos:
             return results, ball_pos, "yolo"
 
-        # -------------------------------------------
         # 2. HSV color fallback
-        # -------------------------------------------
         ball_pos = self._detect_ball_hsv(frame)
 
         if ball_pos:
             return results, ball_pos, "hsv"
 
-        # -------------------------------------------
-        # 3. Motion / background subtraction fallback
-        # -------------------------------------------
+        # 3. Motion fallback — stricter circularity to avoid player limbs
         ball_pos = self._detect_ball_motion(frame)
 
         if ball_pos:
@@ -90,10 +78,7 @@ class Detector:
 
     def detect_rackets(self, result):
         """
-        Extract racket detections from YOLO result.
-        Uses COCO class 38 (tennis racket) with a higher confidence threshold
-        to reduce false positives on padel rackets.
-
+        Extract racket detections from YOLO result (class 38 = tennis racket).
         Returns list of dicts: {cx, cy, x1, y1, x2, y2, conf, track_id}
         """
 
@@ -112,7 +97,6 @@ class Detector:
 
             conf = float(box.conf[0])
 
-            # skip low confidence detections
             if conf < self.racket_conf_threshold:
                 continue
 
@@ -120,7 +104,6 @@ class Detector:
             cx = float((x1 + x2) / 2)
             cy = float((y1 + y2) / 2)
 
-            # tracking ID if available
             track_id = None
             if hasattr(boxes, "id") and boxes.id is not None:
                 track_id = int(boxes.id[i])
@@ -140,24 +123,25 @@ class Detector:
 
     def _detect_ball_hsv(self, frame):
         """
-        Detect ball using HSV color mask (yellow-green range)
+        Detect ball using HSV color mask (yellow-green range).
+        Requires circularity >= 0.6 to filter non-ball blobs.
         """
 
         hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
         mask = cv2.inRange(hsv, self.hsv_lower, self.hsv_upper)
 
-        # clean up noise
         kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
         mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
         mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
 
         contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
-        return self._best_ball_contour(contours)
+        return self._best_ball_contour(contours, min_circularity=0.6)
 
     def _detect_ball_motion(self, frame):
         """
-        Detect ball using background subtraction (catches fast-moving blobs)
+        Detect ball using background subtraction.
+        Uses strict circularity >= 0.7 to avoid firing on player limbs and arms.
         """
 
         fg_mask = self.bg_subtractor.apply(frame)
@@ -169,11 +153,12 @@ class Detector:
 
         contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
-        return self._best_ball_contour(contours)
+        return self._best_ball_contour(contours, min_circularity=0.7)
 
-    def _best_ball_contour(self, contours):
+    def _best_ball_contour(self, contours, min_circularity=0.5):
         """
         Pick the contour that best matches a small circular ball.
+        min_circularity filters out non-circular blobs like player limbs.
         Returns (cx, cy) or None.
         """
 
@@ -194,10 +179,12 @@ class Detector:
             if perimeter == 0:
                 continue
 
-            # circularity: 1.0 = perfect circle
             circularity = (4 * np.pi * area) / (perimeter ** 2)
 
-            # prefer high circularity + small radius
+            # reject blobs that are not circular enough
+            if circularity < min_circularity:
+                continue
+
             score = circularity * (1.0 / (radius + 1))
 
             if score > best_score:

@@ -43,6 +43,17 @@ class Pipeline:
             fps = 30
         print(f"Video FPS: {fps}")
 
+        # setup video writer for annotated output
+        width  = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        out_path = os.path.join(self.output_dir, "output_annotated.mp4")
+        writer = cv2.VideoWriter(
+            out_path,
+            cv2.VideoWriter_fourcc(*"mp4v"),
+            fps,
+            (width, height)
+        )
+
         while True:
             ret, frame = cap.read()
             if not ret:
@@ -74,13 +85,16 @@ class Pipeline:
             # visualization
             frame = self.visualizer.draw(frame, results[0], shot, ball_pos, ball_method, rackets, ball_history)
 
+            writer.write(frame)
             cv2.imshow("Padel Analytics", frame)
 
             if cv2.waitKey(1) & 0xFF == ord('q'):
                 break
 
         cap.release()
+        writer.release()
         cv2.destroyAllWindows()
+        print(f"Annotated video saved -> {out_path}")
 
         # save results
         shots = self.shot_classifier.get_shots()

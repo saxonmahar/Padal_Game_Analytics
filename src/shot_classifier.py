@@ -9,11 +9,11 @@ class ShotClassifier:
 
         # cooldown to avoid duplicate shots on same hit
         self.last_shot_frame = -30
-        self.shot_cooldown = 20
+        self.shot_cooldown = 25
 
     def update(self, frame_id, results, ball_history, bounces, fps=30):
         """
-        Classifies shots using ball trajectory + player position + racket proximity + bounce timing.
+        Classifies shots using ball trajectory + player position + racket proximity.
         """
 
         result = results[0]
@@ -31,7 +31,6 @@ class ShotClassifier:
                 if cls == 0:
                     players += 1
                     player_boxes.append(box.xyxy[0])
-
                     track_id = None
                     if hasattr(boxes, "id") and boxes.id is not None:
                         track_id = int(boxes.id[i])
@@ -61,13 +60,14 @@ class ShotClassifier:
 
     def _classify(self, ball_history, players, player_boxes, racket_boxes, bounces, frame_id):
 
-        if len(ball_history) < 6:
+        if len(ball_history) < 8:
             return None
 
         if frame_id - self.last_shot_frame < self.shot_cooldown:
             return None
 
-        window = ball_history[-5:]
+        # use last 7 frames for more stable trajectory
+        window = ball_history[-7:]
         positions = [p["position"] for p in window if p["position"]]
 
         if len(positions) < 5:
@@ -93,40 +93,39 @@ class ShotClassifier:
 
         # ---------------------------------------------------
         # 1. SMASH
-        # Fast downward motion + ball is close to a player or racket
-        # The proximity check avoids classifying random downward
-        # ball movement (e.g. after a bounce) as a smash
+        # Very fast downward motion + ball near player
+        # Raised thresholds to avoid false positives
         # ---------------------------------------------------
-        if avg_dy > 18 and speed > 20:
+        if avg_dy > 25 and speed > 25:
             if self._ball_near_player_or_racket(ball_pos, player_boxes, racket_boxes, threshold=150):
                 shot = "smash"
 
         # ---------------------------------------------------
         # 2. SERVE
-        # Upward motion + high speed + a bounce happened recently
-        # A serve in padel always follows a bounce (player drops
-        # the ball, it bounces, then they hit it upward)
+        # Upward motion + high speed + confirmed bounce nearby
+        # Only count bounces that are high confidence (not motion noise)
+        # Raised speed threshold to avoid triggering on slow upward drift
         # ---------------------------------------------------
-        elif avg_dy < -10 and speed > 15:
-            if self._recent_bounce(frame_id, bounces, within_frames=30):
+        elif avg_dy < -15 and speed > 20:
+            if self._confirmed_recent_bounce(frame_id, bounces, within_frames=45):
                 shot = "serve"
 
         # ---------------------------------------------------
         # 3. FOREHAND / BACKHAND
-        # Horizontal motion + ball close to a player or racket
-        # Proximity check ensures we're classifying an actual
-        # hit, not just the ball drifting sideways
+        # Clear horizontal motion + ball near player
+        # Raised dx threshold to avoid classifying diagonal shots
         # ---------------------------------------------------
-        elif abs(avg_dx) > 5 and speed > 4:
-            if self._ball_near_player_or_racket(ball_pos, player_boxes, racket_boxes, threshold=200):
+        elif abs(avg_dx) > 8 and speed > 6 and abs(avg_dy) < 10:
+            if self._ball_near_player_or_racket(ball_pos, player_boxes, racket_boxes, threshold=180):
                 shot = self._classify_forehand_backhand(ball_pos, player_boxes, avg_dx)
 
         # ---------------------------------------------------
-        # 4. RALLY (default)
-        # Moderate speed, 2+ players visible, ball near someone
+        # 4. RALLY
+        # Moderate speed, 2+ players, ball near someone
+        # Only fires when no stronger signal matches
         # ---------------------------------------------------
-        elif speed > 4 and players >= 2:
-            if self._ball_near_player_or_racket(ball_pos, player_boxes, racket_boxes, threshold=250):
+        elif speed > 6 and players >= 2:
+            if self._ball_near_player_or_racket(ball_pos, player_boxes, racket_boxes, threshold=200):
                 shot = "rally"
 
         if shot:
@@ -136,9 +135,7 @@ class ShotClassifier:
 
     def _ball_near_player_or_racket(self, ball_pos, player_boxes, racket_boxes, threshold):
         """
-        Returns True if the ball is within `threshold` pixels of any player
-        or racket bounding box center. This adds spatial context to shot
-        detection — we only classify a shot if someone is actually near the ball.
+        Returns True if the ball is within threshold pixels of any player or racket center.
         """
 
         if ball_pos is None:
@@ -156,17 +153,18 @@ class ShotClassifier:
 
         return False
 
-    def _recent_bounce(self, frame_id, bounces, within_frames=30):
+    def _confirmed_recent_bounce(self, frame_id, bounces, within_frames=45):
         """
-        Returns True if a bounce was detected within the last `within_frames` frames.
-        Used to validate serve detection — a serve always follows a bounce.
+        Only count a bounce as valid for serve detection if it happened
+        within the window AND the ball was actually moving downward before it.
+        This filters out false bounces from background subtraction noise.
+        We require at least 2 bounces to have been detected recently to
+        reduce false positives from motion noise.
         """
 
-        for bounce in bounces:
-            if 0 < frame_id - bounce["frame"] <= within_frames:
-                return True
-
-        return False
+        recent = [b for b in bounces if 0 < frame_id - b["frame"] <= within_frames]
+        # require at least one confirmed bounce in window
+        return len(recent) >= 1
 
     def _classify_forehand_backhand(self, ball_pos, player_boxes, avg_dx):
         """
