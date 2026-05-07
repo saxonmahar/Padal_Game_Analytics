@@ -15,6 +15,10 @@ class Tracker:
         self.max_missing_frames = 8
         self.missing_count = 0
 
+        # max pixels the ball can move between frames (rejects false detections)
+        # at 25fps a fast padel ball moves ~30-50px per frame max
+        self.max_jump_distance = 120
+
         # racket tracking: track_id -> list of positions
         self.racket_history = {}
 
@@ -34,6 +38,16 @@ class Tracker:
         """
 
         current_pos = ball_pos
+
+        # reject detections that jump too far from last known position
+        # these are almost always false positives from HSV or motion
+        if current_pos is not None and self.last_position is not None:
+            jump = math.sqrt(
+                (current_pos[0] - self.last_position[0]) ** 2 +
+                (current_pos[1] - self.last_position[1]) ** 2
+            )
+            if jump > self.max_jump_distance:
+                current_pos = None  # treat as missed detection
 
         # handle missing ball detection
         if current_pos is None:
