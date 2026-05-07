@@ -2,6 +2,7 @@ import cv2
 
 
 class Visualizer:
+    """Draws all overlays onto each video frame."""
     def __init__(self):
         print("Visualizer initialized")
 

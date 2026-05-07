@@ -10,6 +10,7 @@ from src.visualizer import Visualizer
 
 
 class Pipeline:
+    """Wires all modules together and runs the frame-by-frame processing loop."""
     def __init__(self, video_path, model_path, output_dir):
         self.video_path = video_path
         self.model_path = model_path
@@ -37,7 +38,7 @@ class Pipeline:
         frame_id = 0
         ball_history = []
 
-        # get video FPS for accurate timestamps
+        # get FPS for accurate timestamps in shot output
         fps = cap.get(cv2.CAP_PROP_FPS)
         if fps <= 0:
             fps = 30

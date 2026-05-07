@@ -7,6 +7,7 @@ from collections import Counter
 
 
 class Analytics:
+    """Collects per-frame stats and saves all result files at the end."""
     def __init__(self):
         print("Analytics module initialized")
 

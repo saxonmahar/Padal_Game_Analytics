@@ -4,64 +4,42 @@ import numpy as np
 
 class Tracker:
     """
-    Ball tracker using a 2D Kalman filter.
+    Tracks the ball across frames using a 2D Kalman filter.
 
-    State vector: [x, y, vx, vy]
-      x, y   — ball position
-      vx, vy — ball velocity (pixels per frame)
+    State: [x, y, vx, vy] — position and velocity
 
-    Why Kalman over EMA:
-      EMA just blends old and new positions — it has no model of motion.
-      Kalman models the ball as a physical object moving with velocity.
-      During occlusion it predicts where the ball should be based on
-      its last known velocity, rather than just holding the last position.
-      It also weighs noisy detections against the predicted trajectory,
-      so false positives have less impact.
+    Why Kalman instead of simple smoothing:
+    - During occlusion it predicts where the ball should be based on velocity,
+      rather than just holding the last known position
+    - Noisy detections are weighted against the predicted trajectory,
+      so false positives have less impact on the track
     """
 
     def __init__(self):
         print("Tracker initialized (Kalman filter)")
 
         self.ball_history = []
+        self.missing_count = 0
+        self.max_missing_frames = 10
 
-        # max pixels the ball can move between frames
-        # rejects obvious false detections before feeding to Kalman
+        # reject detections that jump more than this many pixels in one frame
+        # catches obvious false positives before they reach the Kalman filter
         self.max_jump_distance = 120
 
-        # how many consecutive missed frames before we stop predicting
-        self.max_missing_frames = 10
-        self.missing_count = 0
-
-        # Kalman filter matrices
-        # state: [x, y, vx, vy]
         self._init_kalman()
 
-        # racket tracking: track_id -> list of positions
+        # racket positions stored per track_id
         self.racket_history = {}
 
-        # bounce detection
+        # bounce detection state
         self.bounces = []
         self.prev_dy = None
         self.bounce_cooldown = 0
 
     def _init_kalman(self):
-        """
-        Initialise Kalman filter matrices.
+        """Set up Kalman filter matrices."""
 
-        State transition (F): position += velocity each frame
-        Measurement (H): we observe position only, not velocity
-        Process noise (Q): how much we trust the motion model
-        Measurement noise (R): how much we trust the detector
-        Covariance (P): uncertainty in state estimate
-
-        Tuning:
-          Higher R = trust the model more, smooth but laggy
-          Lower R  = trust detections more, responsive but noisy
-          We use balanced values so the filter tracks real motion
-          without being thrown off by occasional false detections.
-        """
-
-        # state transition matrix
+        # state transition: x += vx, y += vy each frame
         self.F = np.array([
             [1, 0, 1, 0],
             [0, 1, 0, 1],
@@ -69,57 +47,49 @@ class Tracker:
             [0, 0, 0, 1]
         ], dtype=float)
 
-        # measurement matrix (we only observe x, y)
+        # we only measure position (x, y), not velocity
         self.H = np.array([
             [1, 0, 0, 0],
             [0, 1, 0, 0]
         ], dtype=float)
 
-        # process noise — how much the ball can deviate from constant velocity
-        # higher = allows faster direction changes (good for padel)
+        # process noise — higher allows faster direction changes
         self.Q = np.eye(4, dtype=float) * 4.0
 
-        # measurement noise — how much we trust the detector
-        # lowered from 8.0 to 3.0 so Kalman follows detections more closely
-        # this keeps velocity estimates responsive enough for shot detection
+        # measurement noise — lower = trust detections more, higher = smoother
+        # 3.0 keeps velocity responsive enough for shot detection
         self.R = np.eye(2, dtype=float) * 3.0
 
-        # state estimate and covariance — uninitialised
-        self.x = None  # state vector [x, y, vx, vy]
-        self.P = None  # covariance matrix
+        self.x = None   # state vector [x, y, vx, vy]
+        self.P = None   # covariance matrix
 
     def _kalman_init(self, pos):
-        """Initialise state from first detection."""
+        """Start the filter from the first detected position."""
         self.x = np.array([pos[0], pos[1], 0.0, 0.0], dtype=float)
         self.P = np.eye(4, dtype=float) * 100.0
 
     def _kalman_predict(self):
-        """Predict next state using motion model."""
+        """Predict where the ball will be next frame."""
         self.x = self.F @ self.x
         self.P = self.F @ self.P @ self.F.T + self.Q
         return (self.x[0], self.x[1])
 
     def _kalman_update(self, measurement):
-        """Update state with a new measurement (x, y)."""
+        """Correct the prediction using an actual detection."""
         z = np.array(measurement, dtype=float)
-        y = z - self.H @ self.x                        # innovation
-        S = self.H @ self.P @ self.H.T + self.R        # innovation covariance
-        K = self.P @ self.H.T @ np.linalg.inv(S)       # Kalman gain
+        y = z - self.H @ self.x
+        S = self.H @ self.P @ self.H.T + self.R
+        K = self.P @ self.H.T @ np.linalg.inv(S)
         self.x = self.x + K @ y
         self.P = (np.eye(4) - K @ self.H) @ self.P
 
     def update(self, frame_id, ball_pos):
         """
-        Update tracker with a new ball detection (or None if not detected).
-
-        Flow:
-          1. Reject detections that jump too far (false positives)
-          2. If no valid detection: predict using Kalman motion model
-          3. If valid detection: Kalman predict + update (fuses model + measurement)
-          4. Store smoothed position and velocity
+        Update the tracker with a new detection (or None if ball not found).
+        Returns the full ball history list.
         """
 
-        # reject obvious false positives before feeding to Kalman
+        # reject detections that jump too far — likely false positives
         if ball_pos is not None and self.x is not None:
             jump = math.sqrt(
                 (ball_pos[0] - self.x[0]) ** 2 +
@@ -128,29 +98,23 @@ class Tracker:
             if jump > self.max_jump_distance:
                 ball_pos = None
 
-        # first detection — initialise filter
+        # initialise filter on first valid detection
         if ball_pos is not None and self.x is None:
             self._kalman_init(ball_pos)
 
-        # no detection
         if ball_pos is None:
             self.missing_count += 1
-
             if self.x is not None and self.missing_count <= self.max_missing_frames:
-                # predict position using velocity — better than holding last position
-                predicted = self._kalman_predict()
-                current_pos = predicted
+                # predict using velocity instead of holding last position
+                current_pos = self._kalman_predict()
             else:
                 return self.ball_history
         else:
             self.missing_count = 0
-
-            # predict then update (standard Kalman cycle)
             self._kalman_predict()
             self._kalman_update(ball_pos)
             current_pos = (self.x[0], self.x[1])
 
-        # extract velocity from Kalman state
         dx = float(self.x[2])
         dy = float(self.x[3])
         speed = math.sqrt(dx ** 2 + dy ** 2)
@@ -158,22 +122,16 @@ class Tracker:
         self.ball_history.append({
             "frame": frame_id,
             "position": current_pos,
-            "velocity": {
-                "dx": dx,
-                "dy": dy,
-                "speed": speed
-            }
+            "velocity": {"dx": dx, "dy": dy, "speed": speed}
         })
 
         self._detect_bounce(frame_id, dy)
-
         return self.ball_history
 
     def _detect_bounce(self, frame_id, dy):
         """
-        Bounce detection using Kalman-smoothed velocity.
-        dy from Kalman is smoother than raw pixel differences,
-        so bounce detection has fewer false positives.
+        Detect a bounce when vertical velocity flips from downward to upward.
+        Kalman-smoothed velocity means smaller thresholds work reliably.
         """
 
         if self.bounce_cooldown > 0:
@@ -181,22 +139,15 @@ class Tracker:
             self.prev_dy = dy
             return
 
-        if self.prev_dy is not None:
-            # Kalman velocity is smoother so use smaller thresholds
-            if self.prev_dy > 1.5 and dy < -1.5:
-                pos = (float(self.x[0]), float(self.x[1])) if self.x is not None else None
-                self.bounces.append({
-                    "frame": frame_id,
-                    "position": pos
-                })
-                self.bounce_cooldown = 10
+        if self.prev_dy is not None and self.prev_dy > 1.5 and dy < -1.5:
+            pos = (float(self.x[0]), float(self.x[1])) if self.x is not None else None
+            self.bounces.append({"frame": frame_id, "position": pos})
+            self.bounce_cooldown = 10
 
         self.prev_dy = dy
 
     def update_rackets(self, frame_id, rackets):
-        """
-        Track racket positions per track_id across frames.
-        """
+        """Store racket positions per track_id for each frame."""
 
         for racket in rackets:
             track_id = racket["track_id"]
