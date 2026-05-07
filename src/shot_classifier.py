@@ -13,7 +13,7 @@ class ShotClassifier:
 
     def update(self, frame_id, results, ball_history, bounces, fps=30):
         """
-        Classifies shots using ball trajectory + player-relative height + racket proximity.
+        Classifies shots using ball trajectory + player-relative height + proximity.
         """
 
         result = results[0]
@@ -88,48 +88,48 @@ class ShotClassifier:
         ) / len(dx_list)
 
         ball_pos = positions[-1]
-
-        # get ball height relative to nearest player
-        # this removes camera angle bias from raw pixel dy
         ball_zone = self._ball_height_zone(ball_pos, player_boxes)
+
+        # find nearest player distance — used across all rules
+        nearest_dist = self._nearest_player_distance(ball_pos, player_boxes)
 
         shot = None
 
         # ---------------------------------------------------
         # 1. SMASH
-        # Ball is ABOVE the player's head + fast speed
-        # Raw avg_dy > 0 means ball moving down in pixel space
-        # but we now confirm it's actually high up relative to player
+        # Ball above head OR very fast downward motion near player
+        # On top-down cameras ball rarely goes above head in pixels
+        # so we also allow fast downward + very close to player
         # ---------------------------------------------------
-        if ball_zone == "above_head" and speed > 18 and avg_dy > 5:
-            if self._ball_near_player_or_racket(ball_pos, player_boxes, racket_boxes, threshold=180):
+        if speed > 18 and avg_dy > 8:
+            if nearest_dist is not None and nearest_dist < 150:
                 shot = "smash"
 
         # ---------------------------------------------------
         # 2. SERVE
-        # Ball starts near waist/ground level (player toss),
-        # then moves upward fast + recent bounce confirms the toss
+        # Upward motion + high speed + at least 2 confirmed bounces
+        # recently (not just 1 — reduces false positives from
+        # background subtraction noise)
         # ---------------------------------------------------
-        elif ball_zone in ("waist", "low") and speed > 18 and avg_dy < -5:
-            if self._confirmed_recent_bounce(frame_id, bounces, within_frames=45):
+        elif speed > 15 and avg_dy < -8:
+            if self._confirmed_recent_bounce(frame_id, bounces, within_frames=60, min_count=2):
                 shot = "serve"
 
         # ---------------------------------------------------
         # 3. FOREHAND / BACKHAND
-        # Ball at waist height + clear horizontal motion
-        # Direction is computed relative to nearest player center
-        # not raw avg_dx — removes camera angle dependency
+        # Ball must be close to a player (within 150px)
+        # Uses ball position relative to player center
         # ---------------------------------------------------
-        elif ball_zone == "waist" and speed > 5:
-            if self._ball_near_player_or_racket(ball_pos, player_boxes, racket_boxes, threshold=180):
-                shot = self._classify_forehand_backhand(ball_pos, player_boxes, avg_dx)
+        elif speed > 5 and nearest_dist is not None and nearest_dist < 150:
+            shot = self._classify_forehand_backhand(ball_pos, player_boxes, avg_dx)
 
         # ---------------------------------------------------
         # 4. RALLY
-        # Any height, moderate speed, 2+ players visible
+        # Ball moving at moderate speed, 2+ players visible,
+        # ball within reasonable distance of a player
         # ---------------------------------------------------
         elif speed > 6 and players >= 2:
-            if self._ball_near_player_or_racket(ball_pos, player_boxes, racket_boxes, threshold=200):
+            if nearest_dist is not None and nearest_dist < 250:
                 shot = "rally"
 
         if shot:
@@ -137,19 +137,32 @@ class ShotClassifier:
 
         return shot
 
+    def _nearest_player_distance(self, ball_pos, player_boxes):
+        """
+        Returns the pixel distance from the ball to the nearest player center.
+        Returns None if no players detected.
+        """
+
+        if ball_pos is None or not player_boxes:
+            return None
+
+        bx, by = ball_pos
+        min_dist = float("inf")
+
+        for box in player_boxes:
+            x1, y1, x2, y2 = box
+            cx = float((x1 + x2) / 2)
+            cy = float((y1 + y2) / 2)
+            dist = math.sqrt((cx - bx) ** 2 + (cy - by) ** 2)
+            if dist < min_dist:
+                min_dist = dist
+
+        return min_dist
+
     def _ball_height_zone(self, ball_pos, player_boxes):
         """
         Compute ball height relative to the nearest player bounding box.
-        Returns one of: 'above_head', 'waist', 'low', 'unknown'
-
-        This removes camera angle dependency from raw pixel dy values.
-        A downward-angled camera makes all far-end shots look like
-        upward motion in pixel space — relative height fixes that.
-
-        Zones based on player box:
-          above_head : ball y < player top (above head)
-          waist      : ball y between top and mid of player box
-          low        : ball y below mid of player box (near ground)
+        Returns: 'above_head', 'waist', 'low', 'unknown'
         """
 
         if ball_pos is None or not player_boxes:
@@ -157,7 +170,6 @@ class ShotClassifier:
 
         ball_x, ball_y = ball_pos
 
-        # find nearest player
         nearest_box = None
         min_dist = float("inf")
 
@@ -203,41 +215,30 @@ class ShotClassifier:
 
         return False
 
-    def _confirmed_recent_bounce(self, frame_id, bounces, within_frames=45):
+    def _confirmed_recent_bounce(self, frame_id, bounces, within_frames=60, min_count=2):
         """
-        Returns True if a bounce was detected within the last within_frames frames.
-        Used to validate serve detection.
+        Returns True only if at least min_count bounces were detected
+        within the last within_frames frames.
+        Requiring 2+ bounces filters out single false positives from
+        background subtraction noise.
         """
 
         recent = [b for b in bounces if 0 < frame_id - b["frame"] <= within_frames]
-        return len(recent) >= 1
+        return len(recent) >= min_count
 
     def _classify_forehand_backhand(self, ball_pos, player_boxes, avg_dx):
         """
-        Classify forehand vs backhand using ball movement direction
-        relative to the nearest player's center — not raw avg_dx.
-
-        Logic:
-          Find the nearest player center (cx, cy).
-          Compute the vector from player center to ball position.
-          If the ball is moving AWAY from the player's right side = forehand.
-          If the ball is moving AWAY from the player's left side = backhand.
-
-        This is camera-angle independent because it uses the player
-        as the reference frame, not the image coordinate system.
-
+        Classify forehand vs backhand using ball position relative to
+        nearest player center. Camera-angle independent.
         Right-handed player assumption:
-          ball to the right of player center and moving right = forehand
-          ball to the left of player center and moving left  = backhand
+          ball right of player center = forehand
+          ball left of player center  = backhand
         """
 
         if not player_boxes:
-            # no player visible — fall back to raw direction
             return "forehand" if avg_dx > 0 else "backhand"
 
         ball_x, ball_y = ball_pos
-
-        # find nearest player
         nearest_cx = None
         min_dist = float("inf")
 
@@ -254,16 +255,7 @@ class ShotClassifier:
         if nearest_cx is None:
             return "forehand" if avg_dx > 0 else "backhand"
 
-        # relative position: is ball to the right or left of player center
-        ball_relative_x = ball_x - nearest_cx
-
-        # ball is to the right of player AND moving right = forehand
-        # ball is to the left of player AND moving left  = backhand
-        # if they disagree (ball crossed center), use ball position side
-        if ball_relative_x >= 0:
-            return "forehand"
-        else:
-            return "backhand"
+        return "forehand" if ball_x >= nearest_cx else "backhand"
 
     def _nearest_player_id(self, ball_position, player_boxes, player_ids):
         """
