@@ -1,23 +1,40 @@
 import math
+import numpy as np
 
 
 class Tracker:
+    """
+    Ball tracker using a 2D Kalman filter.
+
+    State vector: [x, y, vx, vy]
+      x, y   — ball position
+      vx, vy — ball velocity (pixels per frame)
+
+    Why Kalman over EMA:
+      EMA just blends old and new positions — it has no model of motion.
+      Kalman models the ball as a physical object moving with velocity.
+      During occlusion it predicts where the ball should be based on
+      its last known velocity, rather than just holding the last position.
+      It also weighs noisy detections against the predicted trajectory,
+      so false positives have less impact.
+    """
+
     def __init__(self):
-        print("Tracker initialized (enhanced)")
+        print("Tracker initialized (Kalman filter)")
 
         self.ball_history = []
-        self.last_position = None
 
-        # smoothing factor (0 = no smoothing, closer to 1 = smoother)
-        self.alpha = 0.6
+        # max pixels the ball can move between frames
+        # rejects obvious false detections before feeding to Kalman
+        self.max_jump_distance = 120
 
-        # missing frame handling
-        self.max_missing_frames = 8
+        # how many consecutive missed frames before we stop predicting
+        self.max_missing_frames = 10
         self.missing_count = 0
 
-        # max pixels the ball can move between frames (rejects false detections)
-        # at 25fps a fast padel ball moves ~30-50px per frame max
-        self.max_jump_distance = 120
+        # Kalman filter matrices
+        # state: [x, y, vx, vy]
+        self._init_kalman()
 
         # racket tracking: track_id -> list of positions
         self.racket_history = {}
@@ -27,65 +44,119 @@ class Tracker:
         self.prev_dy = None
         self.bounce_cooldown = 0
 
+    def _init_kalman(self):
+        """
+        Initialise Kalman filter matrices.
+
+        State transition (F): position += velocity each frame
+        Measurement (H): we observe position only, not velocity
+        Process noise (Q): how much we trust the motion model
+        Measurement noise (R): how much we trust the detector
+        Covariance (P): uncertainty in state estimate
+
+        Tuning:
+          Higher R = trust the model more, smooth but laggy
+          Lower R  = trust detections more, responsive but noisy
+          We use balanced values so the filter tracks real motion
+          without being thrown off by occasional false detections.
+        """
+
+        # state transition matrix
+        self.F = np.array([
+            [1, 0, 1, 0],
+            [0, 1, 0, 1],
+            [0, 0, 1, 0],
+            [0, 0, 0, 1]
+        ], dtype=float)
+
+        # measurement matrix (we only observe x, y)
+        self.H = np.array([
+            [1, 0, 0, 0],
+            [0, 1, 0, 0]
+        ], dtype=float)
+
+        # process noise — how much the ball can deviate from constant velocity
+        # higher = allows faster direction changes (good for padel)
+        self.Q = np.eye(4, dtype=float) * 2.0
+
+        # measurement noise — how much we trust the detector
+        # higher = smoother but slower to react to real position changes
+        # lower  = more responsive but noisier
+        # balanced at 8.0 for padel ball speed
+        self.R = np.eye(2, dtype=float) * 8.0
+
+        # state estimate and covariance — uninitialised
+        self.x = None  # state vector [x, y, vx, vy]
+        self.P = None  # covariance matrix
+
+    def _kalman_init(self, pos):
+        """Initialise state from first detection."""
+        self.x = np.array([pos[0], pos[1], 0.0, 0.0], dtype=float)
+        self.P = np.eye(4, dtype=float) * 100.0
+
+    def _kalman_predict(self):
+        """Predict next state using motion model."""
+        self.x = self.F @ self.x
+        self.P = self.F @ self.P @ self.F.T + self.Q
+        return (self.x[0], self.x[1])
+
+    def _kalman_update(self, measurement):
+        """Update state with a new measurement (x, y)."""
+        z = np.array(measurement, dtype=float)
+        y = z - self.H @ self.x                        # innovation
+        S = self.H @ self.P @ self.H.T + self.R        # innovation covariance
+        K = self.P @ self.H.T @ np.linalg.inv(S)       # Kalman gain
+        self.x = self.x + K @ y
+        self.P = (np.eye(4) - K @ self.H) @ self.P
+
     def update(self, frame_id, ball_pos):
         """
-        Improved ball tracking with:
-        - smoothing (EMA)
-        - missing frame handling
-        - velocity calculation
+        Update tracker with a new ball detection (or None if not detected).
 
-        ball_pos: (cx, cy) from Detector.detect_with_ball_fallback(), or None
+        Flow:
+          1. Reject detections that jump too far (false positives)
+          2. If no valid detection: predict using Kalman motion model
+          3. If valid detection: Kalman predict + update (fuses model + measurement)
+          4. Store smoothed position and velocity
         """
 
-        current_pos = ball_pos
-
-        # reject detections that jump too far from last known position
-        # these are almost always false positives from HSV or motion
-        if current_pos is not None and self.last_position is not None:
+        # reject obvious false positives before feeding to Kalman
+        if ball_pos is not None and self.x is not None:
             jump = math.sqrt(
-                (current_pos[0] - self.last_position[0]) ** 2 +
-                (current_pos[1] - self.last_position[1]) ** 2
+                (ball_pos[0] - self.x[0]) ** 2 +
+                (ball_pos[1] - self.x[1]) ** 2
             )
             if jump > self.max_jump_distance:
-                current_pos = None  # treat as missed detection
+                ball_pos = None
 
-        # handle missing ball detection
-        if current_pos is None:
+        # first detection — initialise filter
+        if ball_pos is not None and self.x is None:
+            self._kalman_init(ball_pos)
+
+        # no detection
+        if ball_pos is None:
             self.missing_count += 1
 
-            if self.last_position and self.missing_count <= self.max_missing_frames:
-                # reuse last known position
-                current_pos = self.last_position
+            if self.x is not None and self.missing_count <= self.max_missing_frames:
+                # predict position using velocity — better than holding last position
+                predicted = self._kalman_predict()
+                current_pos = predicted
             else:
-                # skip if missing too long
                 return self.ball_history
         else:
             self.missing_count = 0
 
-        # apply smoothing (EMA)
-        if self.last_position:
-            prev_x, prev_y = self.last_position
-            curr_x, curr_y = current_pos
+            # predict then update (standard Kalman cycle)
+            self._kalman_predict()
+            self._kalman_update(ball_pos)
+            current_pos = (self.x[0], self.x[1])
 
-            smooth_x = self.alpha * prev_x + (1 - self.alpha) * curr_x
-            smooth_y = self.alpha * prev_y + (1 - self.alpha) * curr_y
+        # extract velocity from Kalman state
+        dx = float(self.x[2])
+        dy = float(self.x[3])
+        speed = math.sqrt(dx ** 2 + dy ** 2)
 
-            current_pos = (smooth_x, smooth_y)
-
-        # compute velocity
-        speed = 0
-        dx, dy = 0, 0
-
-        if self.last_position:
-            prev_x, prev_y = self.last_position
-            curr_x, curr_y = current_pos
-
-            dx = curr_x - prev_x
-            dy = curr_y - prev_y
-            speed = math.sqrt(dx**2 + dy**2)
-
-        # store data
-        frame_data = {
+        self.ball_history.append({
             "frame": frame_id,
             "position": current_pos,
             "velocity": {
@@ -93,24 +164,17 @@ class Tracker:
                 "dy": dy,
                 "speed": speed
             }
-        }
+        })
 
-        self.ball_history.append(frame_data)
-
-        # update last position
-        self.last_position = current_pos
-
-        # check for bounce after storing
         self._detect_bounce(frame_id, dy)
 
         return self.ball_history
 
     def _detect_bounce(self, frame_id, dy):
         """
-        Rule-based bounce detection:
-        A bounce occurs when the ball's vertical direction flips from
-        downward (dy > 0) to upward (dy < 0) — i.e. ball hits the floor and rises.
-        Cooldown prevents duplicate detections on the same bounce.
+        Bounce detection using Kalman-smoothed velocity.
+        dy from Kalman is smoother than raw pixel differences,
+        so bounce detection has fewer false positives.
         """
 
         if self.bounce_cooldown > 0:
@@ -119,26 +183,23 @@ class Tracker:
             return
 
         if self.prev_dy is not None:
-            # downward motion followed by upward motion = bounce
             if self.prev_dy > 3 and dy < -3:
+                pos = (float(self.x[0]), float(self.x[1])) if self.x is not None else None
                 self.bounces.append({
                     "frame": frame_id,
-                    "position": self.last_position
+                    "position": pos
                 })
-                self.bounce_cooldown = 10  # skip next 10 frames
+                self.bounce_cooldown = 10
 
         self.prev_dy = dy
 
     def update_rackets(self, frame_id, rackets):
         """
         Track racket positions per track_id across frames.
-        rackets: list of dicts from Detector.detect_rackets()
         """
 
         for racket in rackets:
             track_id = racket["track_id"]
-
-            # use cx/cy as key if no track_id assigned
             key = track_id if track_id is not None else f"untracked_{frame_id}"
 
             if key not in self.racket_history:
@@ -151,6 +212,9 @@ class Tracker:
                 "conf": racket["conf"]
             })
 
+    def get_ball_trajectory(self):
+        return self.ball_history
+
     def get_racket_history(self):
         return self.racket_history
 
@@ -158,7 +222,6 @@ class Tracker:
         return self.bounces
 
     def get_ball_speed(self):
-        if len(self.ball_history) < 1:
-            return 0
-
+        if not self.ball_history:
+            return 0.0
         return self.ball_history[-1]["velocity"]["speed"]
