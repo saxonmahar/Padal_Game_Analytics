@@ -1,20 +1,8 @@
 # Padel Game Analytics — Shot Classification System
 
-This project shows how I solve problems when the "right" approach isn't available. No padel training data existed, so instead of forcing a model that would fail, I built a hybrid detection system, implemented proper tracking, and wrote rule-based classification with enough context to be meaningful.
+I built this as part of a computer vision assignment. The task was to analyze padel match footage — detect the ball, players, and rackets, classify shot types, and output structured analytics.
 
----
-
-## What It Does
-
-- Detects the ball using a three-layer hybrid approach — YOLO, HSV color segmentation, background subtraction
-- Tracks players and rackets with persistent IDs across the full video using ByteTrack
-- Classifies shots — forehand, backhand, smash, serve, rally — using trajectory analysis with spatial and temporal context
-- Assigns each shot to the nearest player using tracked IDs
-- Detects ball bounces using vertical velocity reversal
-- Draws a fading ball trail on the video to visualize trajectory quality
-- Exports structured results as JSON and CSV
-- Generates a 5-chart analytics dashboard
-- Measures accuracy against 25 manually labeled ground truth shots
+I want to be upfront: this is a prototype. Some parts work well, some are still rough, and I know exactly where the gaps are. I've tried to document all of it honestly, including what I started with, what I improved, and what I'd do next.
 
 ---
 
@@ -39,101 +27,104 @@ Results saved to `results/`.
 ```
 Video Input
     ↓
-Detector   →  YOLO (players, rackets) + HSV + Motion fallback (ball)
+Detector   →  YOLO (players, rackets) + HSV + Motion fusion (ball)
     ↓
-Tracker    →  EMA smoothing · missing frame interpolation · bounce detection
+Tracker    →  Kalman filter · jump rejection · bounce detection
     ↓
-Classifier →  Rules: player-relative height + player-relative direction + bounce timing
+Classifier →  Rules: player-relative height + direction + bounce timing + speed spike
     ↓
-Analytics  →  JSON · CSV · summary stats · dashboard PNG
+Analytics  →  JSON · CSV · summary · dashboard PNG
     ↓
 Visualizer →  Ball trail · bounding boxes · shot labels on video
 ```
 
 ---
 
-## Key Technical Decisions
+## Where I Started and What I Changed
 
-### Ball Detection — Hybrid Over Single Model
+### Ball Detection
 
-I identified early that YOLO's pretrained COCO model couldn't detect padel balls — under 10% accuracy on the test video. The model was trained on soccer and basketballs, not a 15-pixel fast-moving object.
+**Where I started:** YOLO alone. It detected the ball in under 10% of frames. The model was trained on soccer and basketballs — a padel ball is 15 pixels wide and moves fast. It just didn't work.
 
-Instead of forcing it, I built a three-layer cascade:
-1. **YOLO (class 32)** — runs first, works when the ball is visible and large enough
-2. **HSV color segmentation** — thresholds the yellow-green color range, scores contours by circularity
-3. **Background subtraction (MOG2)** — highlights anything moving against the static court, picks small circular blobs
+**What I tried first:** Lowering the confidence threshold. Got more false positives, not more ball. Tried a bigger YOLO model — slightly better, much slower.
 
-Result: detection rate went from ~10% to ~60–70%. The visualizer color-codes which method fired per frame — cyan for YOLO, orange for HSV, green for motion. That debugging tool alone saved hours of guessing.
+**What I built:** A three-layer cascade — YOLO first, then HSV color segmentation (padel balls are yellow-green), then background subtraction (anything moving against the static court). Detection rate went from ~10% to ~60–70%.
 
----
+**Problem I hit:** HSV was picking up court markings and player clothing. Too many false positives were being treated as real balls, which broke the trajectory and the classifier downstream.
 
-### Player Tracking — ByteTrack for Persistent IDs
+**What I improved:** Added HSV + motion fusion. Instead of accepting either method alone, I now require both to agree within 40 pixels. A real ball is yellow-green AND moving. A court marking is yellow-green but static. A player's arm moves but isn't yellow-green. Requiring both conditions kills most false positives.
 
-Without persistent tracking, player IDs reset every few frames and shot assignment becomes meaningless. Switching from `model()` to `model.track(persist=True)` was a small code change with a large impact — player 2 in frame 100 is the same player 2 in frame 500. Shot-to-player assignment now means something.
+Also added a max jump distance check in the tracker — if the detected position jumps more than 120 pixels from the last known position in one frame, it's rejected as a false detection before it even reaches the Kalman filter.
 
 ---
 
-### Shot Classification — Rules With Context, Not Naive Thresholds
+### Ball Tracking
 
-No labeled padel shot dataset exists. I looked at tennis models but the mechanics are different enough that transfer learning wasn't reliable. MediaPipe pose estimation ran at 15fps on my hardware and struggled with the overhead camera angle — I chose reliability over complexity.
+**Where I started:** EMA (Exponential Moving Average) smoothing with a simple "hold last position for 8 frames" approach during occlusion.
 
-I built rule-based classification, but with three layers of context that make it less naive:
+**The problem:** EMA just blends old and new positions. It has no model of motion. During occlusion it holds the last position, which is wrong — the ball is still moving. And noisy detections from HSV false positives were throwing off the trajectory.
 
-**Player-relative height** — instead of raw pixel dy (which is camera-angle dependent), I compute where the ball is relative to the nearest player's bounding box. Above the head = smash territory. Waist height = forehand/backhand. This removes the camera angle bias entirely.
+**What I implemented:** A 2D Kalman filter. The state vector is `[x, y, vx, vy]` — position and velocity. Each frame it predicts where the ball should be based on its current velocity, then blends that prediction with the actual detection. During occlusion it predicts using velocity instead of holding the last position. Noisy detections get weighted against the predicted trajectory, so false positives have less impact.
 
-**Player-relative direction** — instead of raw dx, I compute whether the ball is to the left or right of the nearest player's center. Camera-angle independent forehand/backhand classification.
+The key tuning parameter is measurement noise `R=8.0`. Lower R means trust the detector more (responsive but noisy). Higher R means trust the model more (smooth but laggy). 8.0 is a balanced middle ground for padel ball speed.
 
-**Bounce timing for serve** — a serve only fires if there was a bounce in the last 45 frames. In padel, a serve always follows the player bouncing the ball. Without this, any fast upward ball movement gets called a serve. This catches a key padel rule that a naive classifier misses.
+---
+
+### Shot Classification
+
+**Where I started:** Simple motion thresholds. `avg_dy > 18 = smash`, `avg_dy < -10 = serve`. It fired constantly on everything and called almost every shot a serve.
+
+**The problem:** Raw pixel dy is camera-angle dependent. This video is shot from a high overhead angle. From that perspective, almost every shot toward the far end of the court has negative dy in pixel space — so everything looked like a serve.
+
+**What I improved:**
+
+- **Player-relative height** — instead of raw dy, I compute where the ball is relative to the nearest player's bounding box. Above the head = smash. Waist height = forehand/backhand. This removes camera angle bias completely.
+
+- **Player-relative direction** — instead of raw dx, I check whether the ball is to the left or right of the nearest player's center. Camera-angle independent forehand/backhand.
+
+- **Bounce timing for serve** — serve only fires if there were at least 2 bounces in the last 60 frames. A padel serve always follows the player bouncing the ball. Requiring 2 bounces (not 1) filters out background subtraction noise that was generating fake bounces constantly.
+
+- **Speed spike detection** — instead of classifying every frame, I now only classify when ball speed increases by more than 8px/frame (a hit causes acceleration) or the ball is within 80px of a player. This fires once per hit event instead of across many frames.
 
 | Shot | Conditions |
 |---|---|
-| Smash | Ball above player head + fast speed + near player/racket |
-| Serve | Ball at waist/low + upward motion + recent bounce |
-| Forehand | Ball at waist height + ball right of player center |
-| Backhand | Ball at waist height + ball left of player center |
-| Rally | Moderate speed + 2+ players visible + ball near someone |
+| Smash | Fast downward motion + ball within 150px of player |
+| Serve | Upward motion + high speed + 2+ recent bounces |
+| Forehand | Ball right of nearest player center + speed > 5 + within 150px |
+| Backhand | Ball left of nearest player center + speed > 5 + within 150px |
+| Rally | Moderate speed + 2+ players visible + within 250px |
 
 ---
 
-### Evaluation — Measuring Instead of Guessing
+### Evaluation
 
-I built `evaluate.py` against 25 manually labeled shots. That's a small sample, but having an actual number tells me where to focus next.
+I built `evaluate.py` against 25 manually labeled shots. Small sample, but having a number is better than guessing.
 
 ```bash
 python evaluate.py
 ```
 
-```
-Detection rate : 80.0%   (shot found near the right frame)
-Accuracy       : 64.0%   (correct type / total ground truth)
-
-Per-class:
-  forehand    80.0%
-  backhand    66.7%
-  smash       75.0%
-  serve       60.0%
-  rally       50.0%
-```
-
-The evaluation identified rally and serve as the weak spots. My next iteration would focus there — tighter bounce detection for serve, and a minimum speed threshold to separate rally from noise.
+The evaluation now outputs a confusion matrix alongside accuracy and per-class breakdown. The confusion matrix shows exactly which shot types are being confused with which — much more useful than just an overall accuracy number.
 
 Full report: `results/evaluation_report.json`
 
 ---
 
-### Why Not MediaPipe Pose Estimation
+### Why I Didn't Use MediaPipe Pose Estimation
 
-I considered it. Pose estimation would give wrist positions, elbow angles, and shoulder rotation — the right features for reliable forehand/backhand classification.
+I thought about this one quite a bit. Pose estimation is genuinely the right tool for forehand/backhand classification — wrist position, elbow angle, shoulder rotation. If you can see those, you don't need to guess which side of the body the ball is on.
 
-I decided against it for three reasons:
+But I didn't use it, and here's why.
 
-1. **Speed** — MediaPipe runs at ~15fps on CPU on my machine. The pipeline already runs slower than real time. Adding pose estimation would make it significantly worse.
+First, speed. On my machine without a GPU, MediaPipe runs at around 15fps. The pipeline is already slower than real time. Stacking pose estimation on top would make it noticeably worse.
 
-2. **Camera angle** — the test video is shot from a high overhead position. Pose estimation works best from side or front views. From above, shoulder rotation and arm angles are foreshortened and unreliable. The model was trained mostly on upright front-facing poses.
+Second, the camera angle. The test video is shot from high up, looking down at the court. Pose estimation is trained mostly on people filmed from the front or side. From above, limbs overlap, shoulders are foreshortened, and the keypoints become unreliable. I wasn't confident it would actually help on this specific footage.
 
-3. **Risk at this stage** — adding a new dependency that might fail or slow things down is a bad trade. I chose reliability over complexity.
+Third, timing. Adding a new dependency that might fail or slow things down right before submission felt like the wrong call.
 
-What I did instead: made the existing features camera-angle independent through player-relative height and direction. Same root problem, no new dependencies.
+What I did instead was make the existing features camera-angle independent — player-relative height and player-relative direction. Same problem, different approach, no new dependencies.
+
+If I kept working on this, I'd add MediaPipe on every 3rd frame with a fallback to the current rules when pose detection fails.
 
 ---
 
@@ -145,7 +136,7 @@ What I did instead: made the existing features camera-angle independent through 
 | YOLOv8 (Ultralytics) | Object detection |
 | ByteTrack | Multi-object tracking with persistent IDs |
 | OpenCV | HSV filtering, background subtraction, video I/O |
-| NumPy | Velocity and distance calculations |
+| NumPy | Kalman filter matrices, velocity calculations |
 | Pandas | CSV export |
 | Matplotlib | Dashboard generation |
 
@@ -155,9 +146,9 @@ What I did instead: made the existing features camera-angle independent through 
 
 ```
 src/
-├── detector.py        # Hybrid ball detection + racket detection
-├── tracker.py         # Ball tracking, EMA smoothing, bounce detection
-├── shot_classifier.py # Shot classification + player assignment
+├── detector.py        # Hybrid ball detection (YOLO + HSV+motion fusion) + racket detection
+├── tracker.py         # Kalman filter tracking + jump rejection + bounce detection
+├── shot_classifier.py # Shot classification + speed spike detection + player assignment
 ├── analytics.py       # Data export + dashboard
 ├── visualizer.py      # Video overlay — ball trail, boxes, shot labels
 └── pipeline.py        # Main processing loop
@@ -165,7 +156,7 @@ src/
 data/
 └── ground_truth.json  # 25 manually labeled shots for evaluation
 
-evaluate.py            # Accuracy evaluation script
+evaluate.py            # Accuracy + confusion matrix evaluation script
 main.py                # Entry point
 ```
 
@@ -181,7 +172,7 @@ main.py                # Entry point
 | `ball_trajectory.json` | Ball position + velocity per frame |
 | `racket_tracking.json` | Racket positions per track ID |
 | `bounces.json` | Bounce events with frame and position |
-| `evaluation_report.json` | Accuracy vs ground truth |
+| `evaluation_report.json` | Accuracy + confusion matrix vs ground truth |
 | `dashboard.png` | 5-chart visual summary |
 
 ```json
@@ -201,20 +192,26 @@ main.py                # Entry point
 
 ---
 
-## Limitations
+## Real Limitations
 
-Ball detection still misses 30–40% of frames, especially when the ball goes behind a player or the net. The shot rules are tuned to one camera angle — a different video would need retuning. Racket detection uses COCO class 38 (tennis racket) which is noisy on padel footage. Forehand/backhand assumes right-handed players.
+Ball detection still misses frames during occlusion and fast motion. The Kalman filter predicts through short gaps but can't recover from long ones.
 
-The 64% accuracy is on 25 samples — honest but not statistically strong. A proper evaluation needs more samples across multiple videos.
+Shot classification rules are tuned to this video. A different camera angle, court, or lighting will probably need retuning. The thresholds are hand-picked, not learned.
+
+Racket detection uses COCO class 38 (tennis racket) — noisy on padel footage. It contributes to proximity checks but I wouldn't rely on it alone.
+
+Forehand/backhand assumes right-handed players. Left-handed players will be misclassified.
+
+25 ground truth samples is not enough for a statistically meaningful evaluation. It tells me where to look, not how good the system actually is.
 
 ---
 
-## If I Were Building This for Production
+## What I'd Do With More Time
 
-- Fine-tune YOLO on a padel-specific dataset — the single biggest lever for improvement
-- Replace EMA smoothing with Kalman filtering for proper occlusion handling
-- Add court homography to map pixel coordinates to real court coordinates — makes all spatial features truly camera-angle independent
+- Fine-tune YOLO on padel-specific data — the single biggest improvement available
+- Add court homography to map pixel positions to real court coordinates — makes all spatial features truly camera-angle independent
 - Add MediaPipe pose estimation on every 3rd frame with fallback to current rules
-- Train a temporal classifier (SlowFast / I3D) on labeled shot clips to replace the rules
-- Treat 64% as a baseline and improve through iterative labeling of edge cases
-- Build the evaluation framework first — it would have helped tune thresholds much faster
+- Train a temporal classifier on labeled shot clips to replace the hand-tuned rules
+- Label more ground truth samples — 25 is not enough
+- Add rally segmentation to group shots into points
+- Build the evaluation script first next time — it would have helped tune thresholds much faster
