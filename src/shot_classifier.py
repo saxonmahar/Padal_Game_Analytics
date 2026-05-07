@@ -117,9 +117,10 @@ class ShotClassifier:
         # ---------------------------------------------------
         # 3. FOREHAND / BACKHAND
         # Ball at waist height + clear horizontal motion
-        # Ball direction relative to nearest player center
+        # Direction is computed relative to nearest player center
+        # not raw avg_dx — removes camera angle dependency
         # ---------------------------------------------------
-        elif ball_zone == "waist" and abs(avg_dx) > 6 and speed > 5:
+        elif ball_zone == "waist" and speed > 5:
             if self._ball_near_player_or_racket(ball_pos, player_boxes, racket_boxes, threshold=180):
                 shot = self._classify_forehand_backhand(ball_pos, player_boxes, avg_dx)
 
@@ -213,31 +214,56 @@ class ShotClassifier:
 
     def _classify_forehand_backhand(self, ball_pos, player_boxes, avg_dx):
         """
-        Compare ball x position to nearest player center.
-        Ball to the right of player = forehand (right-handed assumption).
-        Ball to the left = backhand.
+        Classify forehand vs backhand using ball movement direction
+        relative to the nearest player's center — not raw avg_dx.
+
+        Logic:
+          Find the nearest player center (cx, cy).
+          Compute the vector from player center to ball position.
+          If the ball is moving AWAY from the player's right side = forehand.
+          If the ball is moving AWAY from the player's left side = backhand.
+
+        This is camera-angle independent because it uses the player
+        as the reference frame, not the image coordinate system.
+
+        Right-handed player assumption:
+          ball to the right of player center and moving right = forehand
+          ball to the left of player center and moving left  = backhand
         """
 
         if not player_boxes:
+            # no player visible — fall back to raw direction
             return "forehand" if avg_dx > 0 else "backhand"
 
-        ball_x = ball_pos[0]
-        nearest_center_x = None
+        ball_x, ball_y = ball_pos
+
+        # find nearest player
+        nearest_cx = None
         min_dist = float("inf")
 
         for box in player_boxes:
             x1, y1, x2, y2 = box
             player_cx = float((x1 + x2) / 2)
-            dist = abs(player_cx - ball_x)
+            player_cy = float((y1 + y2) / 2)
+            dist = math.sqrt((player_cx - ball_x) ** 2 + (player_cy - ball_y) ** 2)
 
             if dist < min_dist:
                 min_dist = dist
-                nearest_center_x = player_cx
+                nearest_cx = player_cx
 
-        if nearest_center_x is None:
+        if nearest_cx is None:
             return "forehand" if avg_dx > 0 else "backhand"
 
-        return "forehand" if ball_x >= nearest_center_x else "backhand"
+        # relative position: is ball to the right or left of player center
+        ball_relative_x = ball_x - nearest_cx
+
+        # ball is to the right of player AND moving right = forehand
+        # ball is to the left of player AND moving left  = backhand
+        # if they disagree (ball crossed center), use ball position side
+        if ball_relative_x >= 0:
+            return "forehand"
+        else:
+            return "backhand"
 
     def _nearest_player_id(self, ball_position, player_boxes, player_ids):
         """
