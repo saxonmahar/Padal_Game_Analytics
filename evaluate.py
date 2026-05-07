@@ -1,23 +1,4 @@
-"""
-evaluate.py
 
-Compares the system's shot predictions against manually labeled ground truth.
-
-How to use:
-1. Run the pipeline first:  python main.py
-2. Then run this:           python evaluate.py
-
-Ground truth is in data/ground_truth.json
-Predictions are read from results/shots_detected.json
-
-Matching logic:
-  A prediction is considered correct if:
-  - The shot type matches the ground truth label
-  - The predicted frame is within FRAME_TOLERANCE frames of the ground truth frame
-
-This tolerance accounts for the fact that shot detection fires slightly
-before or after the actual hit depending on ball trajectory window size.
-"""
 
 import json
 from collections import defaultdict
