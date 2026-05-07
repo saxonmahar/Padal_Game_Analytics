@@ -103,13 +103,12 @@ class ShotClassifier:
         nearest_dist = self._nearest_player_distance(ball_pos, player_boxes)
 
         # hit event detection — only classify at the moment of impact
-        # a hit causes a speed spike: ball accelerates suddenly
-        # this prevents classifying the same shot across many frames
-        speed_increased = (speed - self.prev_speed) > self.speed_spike_threshold
+        # Kalman smooths velocity so spikes are smaller — threshold lowered
+        speed_increased = (speed - self.prev_speed) > 3
 
-        # also allow classification if ball is very close to player
-        # (handles slow shots where speed spike is small)
-        close_contact = nearest_dist is not None and nearest_dist < 80
+        # close contact threshold widened — from top-down camera the ball
+        # is rarely within 80px of player torso center
+        close_contact = nearest_dist is not None and nearest_dist < 200
 
         if not speed_increased and not close_contact:
             return None
@@ -120,34 +119,18 @@ class ShotClassifier:
         # so we also allow fast downward + very close to player
         # ---------------------------------------------------
         if speed > 18 and avg_dy > 8:
-            if nearest_dist is not None and nearest_dist < 150:
+            if nearest_dist is not None and nearest_dist < 250:
                 shot = "smash"
 
-        # ---------------------------------------------------
-        # 2. SERVE
-        # Upward motion + high speed + at least 2 confirmed bounces
-        # recently (not just 1 — reduces false positives from
-        # background subtraction noise)
-        # ---------------------------------------------------
         elif speed > 15 and avg_dy < -8:
             if self._confirmed_recent_bounce(frame_id, bounces, within_frames=60, min_count=2):
                 shot = "serve"
 
-        # ---------------------------------------------------
-        # 3. FOREHAND / BACKHAND
-        # Ball must be close to a player (within 150px)
-        # Uses ball position relative to player center
-        # ---------------------------------------------------
-        elif speed > 5 and nearest_dist is not None and nearest_dist < 150:
+        elif speed > 5 and nearest_dist is not None and nearest_dist < 250:
             shot = self._classify_forehand_backhand(ball_pos, player_boxes, avg_dx)
 
-        # ---------------------------------------------------
-        # 4. RALLY
-        # Ball moving at moderate speed, 2+ players visible,
-        # ball within reasonable distance of a player
-        # ---------------------------------------------------
-        elif speed > 6 and players >= 2:
-            if nearest_dist is not None and nearest_dist < 250:
+        elif speed > 4 and players >= 2:
+            if nearest_dist is not None and nearest_dist < 350:
                 shot = "rally"
 
         if shot:

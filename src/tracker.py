@@ -77,13 +77,12 @@ class Tracker:
 
         # process noise — how much the ball can deviate from constant velocity
         # higher = allows faster direction changes (good for padel)
-        self.Q = np.eye(4, dtype=float) * 2.0
+        self.Q = np.eye(4, dtype=float) * 4.0
 
         # measurement noise — how much we trust the detector
-        # higher = smoother but slower to react to real position changes
-        # lower  = more responsive but noisier
-        # balanced at 8.0 for padel ball speed
-        self.R = np.eye(2, dtype=float) * 8.0
+        # lowered from 8.0 to 3.0 so Kalman follows detections more closely
+        # this keeps velocity estimates responsive enough for shot detection
+        self.R = np.eye(2, dtype=float) * 3.0
 
         # state estimate and covariance — uninitialised
         self.x = None  # state vector [x, y, vx, vy]
@@ -183,7 +182,8 @@ class Tracker:
             return
 
         if self.prev_dy is not None:
-            if self.prev_dy > 3 and dy < -3:
+            # Kalman velocity is smoother so use smaller thresholds
+            if self.prev_dy > 1.5 and dy < -1.5:
                 pos = (float(self.x[0]), float(self.x[1])) if self.x is not None else None
                 self.bounces.append({
                     "frame": frame_id,
