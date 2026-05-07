@@ -11,6 +11,11 @@ class ShotClassifier:
         self.last_shot_frame = -30
         self.shot_cooldown = 25
 
+        # hit event detection — track speed trend to find the moment
+        # of impact (speed spike) rather than classifying every frame
+        self.prev_speed = 0
+        self.speed_spike_threshold = 8  # minimum speed increase to count as a hit
+
     def update(self, frame_id, results, ball_history, bounces, fps=30):
         """
         Classifies shots using ball trajectory + player-relative height + proximity.
@@ -44,6 +49,10 @@ class ShotClassifier:
             ball_position = ball_history[-1]["position"]
 
         shot = self._classify(ball_history, players, player_boxes, racket_boxes, bounces, frame_id)
+
+        # update speed trend for next frame
+        if ball_history:
+            self.prev_speed = ball_history[-1]["velocity"]["speed"]
 
         if shot:
             player_id = self._nearest_player_id(ball_position, player_boxes, player_ids)
@@ -93,10 +102,19 @@ class ShotClassifier:
         # find nearest player distance — used across all rules
         nearest_dist = self._nearest_player_distance(ball_pos, player_boxes)
 
-        shot = None
+        # hit event detection — only classify at the moment of impact
+        # a hit causes a speed spike: ball accelerates suddenly
+        # this prevents classifying the same shot across many frames
+        speed_increased = (speed - self.prev_speed) > self.speed_spike_threshold
 
-        # ---------------------------------------------------
-        # 1. SMASH
+        # also allow classification if ball is very close to player
+        # (handles slow shots where speed spike is small)
+        close_contact = nearest_dist is not None and nearest_dist < 80
+
+        if not speed_increased and not close_contact:
+            return None
+
+        shot = None
         # Ball above head OR very fast downward motion near player
         # On top-down cameras ball rarely goes above head in pixels
         # so we also allow fast downward + very close to player
