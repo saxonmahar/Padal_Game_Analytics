@@ -13,7 +13,7 @@ class ShotClassifier:
 
     def update(self, frame_id, results, ball_history, bounces, fps=30):
         """
-        Classifies shots using ball trajectory + player position + racket proximity.
+        Classifies shots using ball trajectory + player-relative height + racket proximity.
         """
 
         result = results[0]
@@ -66,7 +66,6 @@ class ShotClassifier:
         if frame_id - self.last_shot_frame < self.shot_cooldown:
             return None
 
-        # use last 7 frames for more stable trajectory
         window = ball_history[-7:]
         positions = [p["position"] for p in window if p["position"]]
 
@@ -89,40 +88,44 @@ class ShotClassifier:
         ) / len(dx_list)
 
         ball_pos = positions[-1]
+
+        # get ball height relative to nearest player
+        # this removes camera angle bias from raw pixel dy
+        ball_zone = self._ball_height_zone(ball_pos, player_boxes)
+
         shot = None
 
         # ---------------------------------------------------
         # 1. SMASH
-        # Very fast downward motion + ball near player
-        # Raised thresholds to avoid false positives
+        # Ball is ABOVE the player's head + fast speed
+        # Raw avg_dy > 0 means ball moving down in pixel space
+        # but we now confirm it's actually high up relative to player
         # ---------------------------------------------------
-        if avg_dy > 25 and speed > 25:
-            if self._ball_near_player_or_racket(ball_pos, player_boxes, racket_boxes, threshold=150):
+        if ball_zone == "above_head" and speed > 18 and avg_dy > 5:
+            if self._ball_near_player_or_racket(ball_pos, player_boxes, racket_boxes, threshold=180):
                 shot = "smash"
 
         # ---------------------------------------------------
         # 2. SERVE
-        # Upward motion + high speed + confirmed bounce nearby
-        # Only count bounces that are high confidence (not motion noise)
-        # Raised speed threshold to avoid triggering on slow upward drift
+        # Ball starts near waist/ground level (player toss),
+        # then moves upward fast + recent bounce confirms the toss
         # ---------------------------------------------------
-        elif avg_dy < -15 and speed > 20:
+        elif ball_zone in ("waist", "low") and speed > 18 and avg_dy < -5:
             if self._confirmed_recent_bounce(frame_id, bounces, within_frames=45):
                 shot = "serve"
 
         # ---------------------------------------------------
         # 3. FOREHAND / BACKHAND
-        # Clear horizontal motion + ball near player
-        # Raised dx threshold to avoid classifying diagonal shots
+        # Ball at waist height + clear horizontal motion
+        # Ball direction relative to nearest player center
         # ---------------------------------------------------
-        elif abs(avg_dx) > 8 and speed > 6 and abs(avg_dy) < 10:
+        elif ball_zone == "waist" and abs(avg_dx) > 6 and speed > 5:
             if self._ball_near_player_or_racket(ball_pos, player_boxes, racket_boxes, threshold=180):
                 shot = self._classify_forehand_backhand(ball_pos, player_boxes, avg_dx)
 
         # ---------------------------------------------------
         # 4. RALLY
-        # Moderate speed, 2+ players, ball near someone
-        # Only fires when no stronger signal matches
+        # Any height, moderate speed, 2+ players visible
         # ---------------------------------------------------
         elif speed > 6 and players >= 2:
             if self._ball_near_player_or_racket(ball_pos, player_boxes, racket_boxes, threshold=200):
@@ -132,6 +135,52 @@ class ShotClassifier:
             self.last_shot_frame = frame_id
 
         return shot
+
+    def _ball_height_zone(self, ball_pos, player_boxes):
+        """
+        Compute ball height relative to the nearest player bounding box.
+        Returns one of: 'above_head', 'waist', 'low', 'unknown'
+
+        This removes camera angle dependency from raw pixel dy values.
+        A downward-angled camera makes all far-end shots look like
+        upward motion in pixel space — relative height fixes that.
+
+        Zones based on player box:
+          above_head : ball y < player top (above head)
+          waist      : ball y between top and mid of player box
+          low        : ball y below mid of player box (near ground)
+        """
+
+        if ball_pos is None or not player_boxes:
+            return "unknown"
+
+        ball_x, ball_y = ball_pos
+
+        # find nearest player
+        nearest_box = None
+        min_dist = float("inf")
+
+        for box in player_boxes:
+            x1, y1, x2, y2 = box
+            cx = float((x1 + x2) / 2)
+            dist = abs(cx - ball_x)
+            if dist < min_dist:
+                min_dist = dist
+                nearest_box = box
+
+        if nearest_box is None:
+            return "unknown"
+
+        x1, y1, x2, y2 = nearest_box
+        player_top = float(y1)
+        player_mid = float((y1 + y2) / 2)
+
+        if ball_y < player_top:
+            return "above_head"
+        elif ball_y < player_mid:
+            return "waist"
+        else:
+            return "low"
 
     def _ball_near_player_or_racket(self, ball_pos, player_boxes, racket_boxes, threshold):
         """
@@ -155,15 +204,11 @@ class ShotClassifier:
 
     def _confirmed_recent_bounce(self, frame_id, bounces, within_frames=45):
         """
-        Only count a bounce as valid for serve detection if it happened
-        within the window AND the ball was actually moving downward before it.
-        This filters out false bounces from background subtraction noise.
-        We require at least 2 bounces to have been detected recently to
-        reduce false positives from motion noise.
+        Returns True if a bounce was detected within the last within_frames frames.
+        Used to validate serve detection.
         """
 
         recent = [b for b in bounces if 0 < frame_id - b["frame"] <= within_frames]
-        # require at least one confirmed bounce in window
         return len(recent) >= 1
 
     def _classify_forehand_backhand(self, ball_pos, player_boxes, avg_dx):
