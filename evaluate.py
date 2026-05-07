@@ -130,6 +130,28 @@ def evaluate():
         "detail": results_detail
     }
 
+    # confusion matrix
+    all_types = sorted(per_class_total.keys())
+    confusion = {gt: {pred: 0 for pred in all_types + ["NOT DETECTED"]} for gt in all_types}
+
+    for r in results_detail:
+        gt = r["gt_type"]
+        pred = r["pred_type"] if r["pred_type"] in all_types else "NOT DETECTED"
+        confusion[gt][pred] += 1
+
+    report["confusion_matrix"] = confusion
+
+    print()
+    print("Confusion Matrix (rows=GT, cols=Predicted):")
+    header = f"{'':14}" + "".join(f"{t:14}" for t in all_types) + f"{'NOT DET':14}"
+    print("  " + header)
+    print("  " + "-" * len(header))
+    for gt in all_types:
+        row = f"  {gt:<14}" + "".join(
+            f"{confusion[gt][pred]:<14}" for pred in all_types
+        ) + f"{confusion[gt]['NOT DETECTED']:<14}"
+        print(row)
+
     with open("results/evaluation_report.json", "w") as f:
         json.dump(report, f, indent=4)
 
