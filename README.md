@@ -1,6 +1,6 @@
 # Padel Game Analytics — Shot Classification System
 
-I built this as part of a computer vision assignment. The task was to analyze padel match footage — detect the ball, players, and rackets, classify shot types, and output structured analytics.
+I built this as part of a computer vision assignment. The task sounds straightforward — detect the ball, players, and rackets in a padel match video, classify shot types, output analytics. But the hard part is that padel balls are tiny (around 15 pixels wide), move fast enough to blur, and disappear behind players constantly. There's no pretrained model for padel, no labeled dataset, and the camera is mounted high overhead which breaks most standard assumptions about player orientation. So the real challenge wasn't "which model do I use" — it was figuring out how to build something meaningful with the tools available.
 
 I want to be upfront: this is a prototype. Some parts work well, some are still rough, and I know exactly where the gaps are. I've tried to document all of it honestly, including what I started with, what I improved, and what I'd do next.
 
@@ -49,6 +49,8 @@ Visualizer →  Ball trail · bounding boxes · shot labels on video
 **What I tried first:** Lowering the confidence threshold. Got more false positives, not more ball. Tried a bigger YOLO model — slightly better, much slower.
 
 **What I built:** A three-layer cascade — YOLO first, then HSV color segmentation (padel balls are yellow-green), then background subtraction (anything moving against the static court). Detection rate went from ~10% to ~60–70%.
+
+I chose HSV and background subtraction over retraining a model because the problem was a domain mismatch, not a model architecture problem. YOLO knows what a ball looks like — it just never saw a padel ball. Retraining would fix that, but it needs labeled data I don't have. Classical CV doesn't need labels — it just needs the right observation, and "yellow-green circular thing that's moving" is a pretty good description of a padel ball.
 
 **Problem I hit:** HSV was picking up court markings and player clothing. Too many false positives were being treated as real balls, which broke the trajectory and the classifier downstream.
 
