@@ -62,13 +62,13 @@ Also added a max jump distance check in the tracker — if the detected position
 
 ### Ball Tracking
 
-**Where I started:** EMA (Exponential Moving Average) smoothing with a simple "hold last position for 8 frames" approach during occlusion.
+**Where I started:** Simple position smoothing — blend the new position with the old one each frame, and if the ball disappears, just hold the last known position for a few frames.
 
-**The problem:** EMA just blends old and new positions. It has no model of motion. During occlusion it holds the last position, which is wrong — the ball is still moving. And noisy detections from HSV false positives were throwing off the trajectory.
+**The problem:** That approach has no idea the ball is actually moving. If the ball disappears behind a player, holding the last position is just wrong — the ball kept going. And noisy detections from HSV false positives were jumping the position around randomly.
 
-**What I implemented:** A 2D Kalman filter. The state vector is `[x, y, vx, vy]` — position and velocity. Each frame it predicts where the ball should be based on its current velocity, then blends that prediction with the actual detection. During occlusion it predicts using velocity instead of holding the last position. Noisy detections get weighted against the predicted trajectory, so false positives have less impact.
+**What I implemented:** A Kalman filter. It tracks both position and velocity, so when the ball disappears it predicts where it should be based on how fast it was moving. When a detection comes back, it blends the prediction with the actual measurement. Noisy detections get pulled toward the predicted trajectory instead of accepted blindly.
 
-The key tuning parameter is measurement noise `R=8.0`. Lower R means trust the detector more (responsive but noisy). Higher R means trust the model more (smooth but laggy). 8.0 is a balanced middle ground for padel ball speed.
+The main tuning knob is measurement noise — how much to trust the detector vs the prediction. Too high and it's smooth but slow to react. Too low and it follows every noisy detection. I settled on a value that keeps velocity responsive enough for shot detection without being too jittery.
 
 ---
 
@@ -86,7 +86,7 @@ The key tuning parameter is measurement noise `R=8.0`. Lower R means trust the d
 
 - **Bounce timing for serve** — serve only fires if there were at least 2 bounces in the last 60 frames. A padel serve always follows the player bouncing the ball. Requiring 2 bounces (not 1) filters out background subtraction noise that was generating fake bounces constantly.
 
-- **Speed spike detection** — instead of classifying every frame, I now only classify when ball speed increases by more than 8px/frame (a hit causes acceleration) or the ball is within 80px of a player. This fires once per hit event instead of across many frames.
+- **Speed spike detection** — instead of classifying every frame, I only classify when the ball suddenly speeds up (a hit causes the ball to accelerate) or when the ball is very close to a player. This way one hit = one shot, not 20 frames of the same shot.
 
 | Shot | Conditions |
 |---|---|
