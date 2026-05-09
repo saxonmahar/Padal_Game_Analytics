@@ -1,3 +1,1 @@
-# src/__init__.py
-
-print("Padel Analytics package loaded")
+# Padel Analytics — src package

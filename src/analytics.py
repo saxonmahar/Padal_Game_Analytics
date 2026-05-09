@@ -64,12 +64,10 @@ class Analytics:
         shots = shots or []
         bounces = bounces or []
 
-        # ---------- SHOTS DETECTED JSON ----------
         shots_path = os.path.join(output_dir, "shots_detected.json")
         with open(shots_path, "w") as f:
             json.dump(shots, f, indent=4)
 
-        # ---------- SHOTS CSV ----------
         csv_path = os.path.join(output_dir, "shots.csv")
         if shots:
             df_shots = pd.DataFrame(shots)
@@ -77,14 +75,11 @@ class Analytics:
             df_shots = pd.DataFrame(columns=["frame_id", "timestamp_seconds", "shot_type", "player_id"])
         df_shots.to_csv(csv_path, index=False)
 
-        # ---------- FRAME DATA JSON ----------
         frame_json_path = os.path.join(output_dir, "frame_data.json")
         with open(frame_json_path, "w") as f:
             json.dump(self.frame_data, f, indent=4)
 
-        # ---------- SUMMARY ----------
         shot_counts = dict(Counter(s["shot_type"] for s in shots))
-
         summary = {
             "total_frames": self.total_frames,
             "total_player_detections": self.total_players_detected,
