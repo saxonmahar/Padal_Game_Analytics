@@ -194,6 +194,16 @@ main.py                # Entry point
 
 ---
 
+## Model
+
+The YOLOv8n pretrained weights are not included in the repo (too large for git).
+
+[Download yolov8n.pt from Google Drive](https://drive.google.com/file/d/1QkikGHJmweDO_Jyu3NQaAOoqRNl8LQvv/view?usp=sharing)
+
+Place the downloaded file at `models/yolov8n.pt` before running.
+
+---
+
 ## Dashboard
 
 ![Dashboard](assets/dashboard.png)
