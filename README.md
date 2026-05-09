@@ -188,9 +188,17 @@ main.py                # Entry point
 
 ---
 
+## Demo
+
+[Watch the annotated output video on Google Drive](https://drive.google.com/file/d/1YlN1oxWtan19uahVHP84UZVZ0pwALs4x/view?usp=sharing)
+
+---
+
 ## Dashboard
 
 ![Dashboard](assets/dashboard.png)
+
+[View full dashboard image on Google Drive](https://drive.google.com/file/d/1Cor6Yn_4D_HueMuBuFO8ipAeSKvV4WSZ/view?usp=sharing)
 
 ---
 
