@@ -6,7 +6,7 @@ class Visualizer:
     def __init__(self):
         print("Visualizer initialized")
 
-        # COCO class names (only ones we need)
+        # COCO class names (only ones we need) 
         self.class_names = {
             0: "Person",
             32: "Ball"

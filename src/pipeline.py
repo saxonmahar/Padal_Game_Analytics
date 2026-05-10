@@ -10,7 +10,7 @@ from src.visualizer import Visualizer
 
 
 class Pipeline:
-    """Wires all modules together and runs the frame-by-frame processing loop."""
+    """Wires  all modules together and runs the frame byframe processing loop."""
     def __init__(self, video_path, model_path, output_dir):
         self.video_path = video_path
         self.model_path = model_path

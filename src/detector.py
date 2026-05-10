@@ -18,7 +18,7 @@ class Detector:
         print("Loading YOLO model...")
         self.model = YOLO(model_path)
 
-        # MOG2 background subtractor — learns what the static court looks like
+        # MOG2(mixture of gaussian version 2) background subtractor - learns what the static court looks like
         # and highlights anything that moves
         self.bg_subtractor = cv2.createBackgroundSubtractorMOG2(
             history=300,

@@ -6,7 +6,7 @@ class Tracker:
     """
     Tracks the ball across frames using a 2D Kalman filter.
 
-    State: [x, y, vx, vy] — position and velocity
+    State: [x, y, vx, vy]  position and velocity
 
     Why Kalman instead of simple smoothing:
     - During occlusion it predicts where the ball should be based on velocity,
@@ -53,10 +53,10 @@ class Tracker:
             [0, 1, 0, 0]
         ], dtype=float)
 
-        # process noise — higher allows faster direction changes
+        # process noise  higher allows faster direction changes
         self.Q = np.eye(4, dtype=float) * 4.0
 
-        # measurement noise — lower = trust detections more, higher = smoother
+        # measurement noise  lower = trust detections more, higher = smoother
         # 3.0 keeps velocity responsive enough for shot detection
         self.R = np.eye(2, dtype=float) * 3.0
 

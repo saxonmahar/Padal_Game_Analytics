@@ -99,14 +99,14 @@ class ShotClassifier:
         ball_pos = positions[-1]
         ball_zone = self._ball_height_zone(ball_pos, player_boxes)
 
-        # find nearest player distance — used across all rules
+        # find nearest player distance - used across all rules
         nearest_dist = self._nearest_player_distance(ball_pos, player_boxes)
 
-        # hit event detection — only classify at the moment of impact
-        # Kalman smooths velocity so spikes are smaller — threshold lowered
+        # hit event detection - only classify at the moment of impact
+        # Kalman smooths velocity so spikes are smaller - threshold lowered
         speed_increased = (speed - self.prev_speed) > 3
 
-        # close contact threshold widened — from top-down camera the ball
+        # close contact threshold widened - from top-down camera the ball
         # is rarely within 80px of player torso center
         close_contact = nearest_dist is not None and nearest_dist < 200
 

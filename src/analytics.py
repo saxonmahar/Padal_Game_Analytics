@@ -7,7 +7,7 @@ from collections import Counter
 
 
 class Analytics:
-    """Collects per-frame stats and saves all result files at the end."""
+    # Collects per-frame stats and saves all result files at the end
     def __init__(self):
         print("Analytics module initialized")
 
@@ -16,9 +16,9 @@ class Analytics:
         self.total_players_detected = 0
 
     def process(self, frame_id, results):
-        """
-        Store per-frame analytics (player counts, racket counts)
-        """
+    
+        # Store per-frame analytics (player counts, racket counts)
+        
 
         self.total_frames += 1
 
@@ -50,14 +50,14 @@ class Analytics:
         return frame_info
 
     def save_results(self, output_dir, shots=None, bounces=None):
-        """
-        Save all results:
-        - shots_detected.json  : full shot list with frame, timestamp, type, player
-        - shots.csv            : same data in CSV format
-        - frame_data.json      : per-frame player/racket counts
-        - summary.json         : totals and shot type breakdown
-        - dashboard.png        : full multi-chart visual dashboard
-        """
+        
+        # Save all results:
+        # shots_detected.json  : full shot list with frame, timestamp, type, player
+        # shots.csv            : same data in CSV format
+        #  frame_data.json      : per-frame player/racket counts
+        #  summary.json         : totals and shot type breakdown
+        #  dashboard.png        : full multi-chart visual dashboard
+        # 
 
         os.makedirs(output_dir, exist_ok=True)
 
@@ -134,9 +134,9 @@ class Analytics:
 
         gs = gridspec.GridSpec(2, 3, figure=fig, hspace=0.45, wspace=0.35)
 
-        # --------------------------------------------------
+    
         # Chart 1: Shot Distribution Bar Chart
-        # --------------------------------------------------
+        
         ax1 = fig.add_subplot(gs[0, 0])
 
         if labels:
@@ -150,9 +150,9 @@ class Analytics:
         ax1.set_ylabel("Count")
         ax1.set_ylim(0, max(values) * 1.2 if values else 1)
 
-        # --------------------------------------------------
+        
         # Chart 2: Shot Type Pie Chart
-        # --------------------------------------------------
+        
         ax2 = fig.add_subplot(gs[0, 1])
 
         if labels:
@@ -171,9 +171,9 @@ class Analytics:
 
         ax2.set_title("Shot Type Distribution (%)", fontsize=12, fontweight="bold")
 
-        # --------------------------------------------------
+    
         # Chart 3: Shot Timeline (when each shot happened)
-        # --------------------------------------------------
+        
         ax3 = fig.add_subplot(gs[0, 2])
 
         if shots:
@@ -219,9 +219,9 @@ class Analytics:
         ax4.legend(loc="upper right")
         ax4.grid(axis="y", linestyle="--", alpha=0.4)
 
-        # --------------------------------------------------
+        
         # Chart 5: Summary Stats (text panel)
-        # --------------------------------------------------
+        
         ax5 = fig.add_subplot(gs[1, 2])
         ax5.axis("off")
 
@@ -255,9 +255,9 @@ class Analytics:
 
         ax5.set_title("Summary", fontsize=12, fontweight="bold")
 
-        # --------------------------------------------------
+        
         # Save
-        # --------------------------------------------------
+        
         dashboard_path = os.path.join(output_dir, "dashboard.png")
         plt.savefig(dashboard_path, dpi=150, bbox_inches="tight")
         plt.close()
